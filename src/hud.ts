@@ -57,6 +57,7 @@ export class MatchHud {
       lobby: () => void;
       exit: () => void;
       settings: () => void;
+      buy?: (item: Item) => string;
     },
     public debug = false,
   ) {
@@ -95,7 +96,7 @@ export class MatchHud {
       this.shop();
     } else if (key.startsWith("buy-")) {
       const item = key.slice(4) as Item;
-      const result = this.sim.buy(this.sim.me, item);
+      const result = h.buy ? h.buy(item) : this.sim.buy(this.sim.me, item);
       this.shop(
         result === "Purchased" ? shop[item].name + " equipped" : result,
       );
@@ -307,7 +308,7 @@ export class MatchHud {
       });
       this.feed = this.feed.slice(0, 5);
     }
-    if (e.type === "kill" && e.actor === 0 && e.victim !== 0) {
+    if (e.type === "kill" && e.actor === s.me.id && e.victim !== s.me.id) {
       const me = s.me,
         pop = this.ids.killpop;
       pop.textContent = "";
@@ -326,12 +327,12 @@ export class MatchHud {
       this.popEnd = s.time + 1.6;
     }
     if (e.type === "hit") {
-      if (e.actor === 0) {
+      if (e.actor === s.me.id) {
         this.hitEnd = s.time + 0.25;
         this.ids.hit.classList.toggle("wall", !!e.wallbang);
         if (e.wallbang) this.note("Wallbang · " + e.amount + " damage");
       }
-      if (e.victim === 0) {
+      if (e.victim === s.me.id) {
         this.hurtEnd = s.time + 0.3;
         const attacker = e.actor === undefined ? null : s.players[e.actor];
         if (attacker) {
@@ -520,7 +521,7 @@ export class MatchHud {
                 ? keyName("buy") + "  /  Open buy menu"
                 : view.reloadEnd
                   ? "Reloading…"
-                  : s.carrier === 0
+                  : s.carrier === p.id
                     ? "Carrying C4"
                     : "",
     );

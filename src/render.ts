@@ -9,6 +9,8 @@ export interface RenderActor extends Vec3 {
   alive: boolean;
   crouched?: boolean;
   moving?: boolean;
+  pitch?: number;
+  weapon?: string;
   last?: Vec3;
 }
 export interface RenderFrame {
@@ -506,13 +508,49 @@ function heldWeapon(id: string) {
   );
   return rig;
 }
+function flatten(group: THREE.Group) {
+  const gs: THREE.BufferGeometry[] = [];
+  for (const obj of [...group.children]) {
+    if (!(obj instanceof THREE.Mesh)) continue;
+    obj.updateMatrix();
+    const g = obj.geometry.index
+      ? obj.geometry.toNonIndexed()
+      : obj.geometry.clone();
+    g.applyMatrix4(obj.matrix);
+    const n = g.getAttribute("position").count,
+      c = obj.material.color,
+      colors = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    gs.push(g);
+    obj.geometry.dispose();
+    obj.material.dispose();
+    group.remove(obj);
+  }
+  const geo = mergeGeometries(gs, false);
+  gs.forEach((g) => g.dispose());
+  if (geo) {
+    const m = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
+    );
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+  }
+}
+
 function humanoid(team: Team) {
   const root = new THREE.Group(),
     fall = new THREE.Group(),
     body = new THREE.Group(),
     torso = new THREE.Group(),
     head = new THREE.Group(),
-    weapon = new THREE.Group(),
+    held = new THREE.Group(),
     ct = team === "CT",
     uniform = ct ? "#586b74" : "#a88059",
     vest = ct ? "#384a50" : "#665944",
@@ -520,7 +558,7 @@ function humanoid(team: Team) {
     arms: THREE.Group[] = [];
   root.add(fall);
   fall.add(body);
-  body.add(torso, head, weapon);
+  body.add(torso, head, held);
   for (const x of [-0.135, 0.135]) {
     const leg = new THREE.Group();
     body.add(leg);
@@ -588,46 +626,9 @@ function humanoid(team: Team) {
     );
     forearm.rotation.y = side * 0.3;
   }
-  part(weapon, 0.087, 0.095, 0.47, dark, 0.13, 1.105, -0.26);
-  barrel(weapon, 0.02, 0.25, matte, 0.13, 1.12, -0.6);
-  // One draw per rigid body group keeps limb animation while holding the bot budget low.
-  function flatten(group: THREE.Group) {
-    const gs: THREE.BufferGeometry[] = [];
-    for (const obj of [...group.children]) {
-      if (!(obj instanceof THREE.Mesh)) continue;
-      obj.updateMatrix();
-      const g = obj.geometry.index
-        ? obj.geometry.toNonIndexed()
-        : obj.geometry.clone();
-      g.applyMatrix4(obj.matrix);
-      const n = g.getAttribute("position").count,
-        c = obj.material.color,
-        colors = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      gs.push(g);
-      obj.geometry.dispose();
-      obj.material.dispose();
-      group.remove(obj);
-    }
-    const geo = mergeGeometries(gs, false);
-    gs.forEach((g) => g.dispose());
-    if (geo) {
-      const m = new THREE.Mesh(
-        geo,
-        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
-      );
-      m.castShadow = true;
-      m.receiveShadow = true;
-      group.add(m);
-    }
-  }
-  [...legs, ...arms, torso, head, weapon].forEach(flatten);
-  return { root, fall, body, head, weapon, legs, arms, team };
+  held.position.set(0.13, 1.105, -0.31);
+  [...legs, ...arms, torso, head].forEach(flatten);
+  return { root, fall, body, head, held, item: "", legs, arms, team };
 }
 type Humanoid = ReturnType<typeof humanoid>;
 interface Ragdoll {
@@ -648,7 +649,7 @@ function pose(
   if (!rag) {
     m.fall.quaternion.identity();
     m.fall.position.set(0, 0, 0);
-    m.weapon.visible = true;
+    m.held.visible = true;
     m.head.rotation.set(0, 0, 0);
     m.arms.forEach((a) => a.rotation.set(0, 0, 0));
     m.legs.forEach((leg, i) => {
@@ -683,7 +684,7 @@ function pose(
     0.13 * Math.sin(Math.min(Math.PI / 2, theta)),
     rag.dir.z * slide,
   );
-  m.weapon.visible = false;
+  m.held.visible = false;
   m.head.rotation.set(
     0.55 * ease + wobble * 0.35,
     rag.side * 0.4 * ease,
@@ -2434,6 +2435,16 @@ export class GameRenderer {
         );
       const rag = this.ragdolls.get(p.id);
       model.root.visible = p.id !== f.viewId && (p.alive || !!rag);
+      const weapon = p.weapon ?? "glock";
+      if (p.alive && model.root.visible && model.item !== weapon) {
+        releaseTree(model.held);
+        model.held.clear();
+        const item = gun(weapon);
+        flatten(item);
+        model.held.add(item);
+        model.item = weapon;
+      }
+      model.held.rotation.x = p.pitch ?? 0;
       const last = p.last ?? p,
         alpha = f.alpha ?? 1;
       model.root.position.set(

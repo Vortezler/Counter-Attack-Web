@@ -9,16 +9,33 @@ import { hubUrl } from "./hub/navigation";
 import { savePlayerName, writeSetting } from "./hub/storage";
 import type { GameRenderer } from "./render";
 import type { Sim, SimEvent } from "./sim/Sim";
-import type { PlayerCommand } from "./sim/player";
+import { idle, type PlayerCommand } from "./sim/player";
+import { applyFrame, peerPlayer, projectFrame, readCommand, readEvent, record } from "./sim/peer-state";
+import { GuestMotion } from "./sim/guest-motion";
+import { mountTouchControls } from "./touch-controls";
+import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
 import type { MapId } from "./world";
 import { catalog, isGun } from "./config/weapons";
-import { actionFor, binds, isBound, lockedKeys, type Action } from "./keybinds";
+import {
+  actionFor,
+  binds,
+  defaultBinds,
+  isBound,
+  lockedKeys,
+  type Action,
+} from "./keybinds";
 
 type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
 const keyboard = () =>
   (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
+const touchAction = (key: string): Action | undefined =>
+  key === "fire" || key === "alt"
+    ? key
+    : (Object.keys(defaultBinds) as Action[]).find((a) =>
+        defaultBinds[a].includes(key),
+      );
 const slots: Partial<Record<Action, number>> = {
   primary: 1,
   pistol: 2,
@@ -37,6 +54,7 @@ export interface GameOptions extends Partial<Omit<MenuChoice, "settings">> {
   botsOnly?: boolean;
   fly?: boolean;
   notice?: string;
+  peer?: PeerMatch;
 }
 export interface GameHandle {
   destroy(): void;
@@ -74,6 +92,8 @@ export async function createGame(
     stage: HTMLElement | null = null;
   let roundListeners: AbortController | null = null,
     raf = 0,
+    hostTimer = 0,
+    hostTime = 0,
     disposed = false,
     generation = 0,
     paused = false,
@@ -88,16 +108,63 @@ export async function createGame(
     wantFullscreen = false,
     wasLocked = false,
     ready = false;
+  const touchHeld = new Set<Action>(),
+    touchTapped = new Set<Action>();
   const keys = new Set<string>(),
     presses = new Set<string>(),
     events = new Map<string, Set<(e: SimEvent) => void>>();
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const fly = !!opts.fly;
+  const network = opts.peer;
+  const host = !!network?.launch.host;
+  const touch = !!network && matchMedia("(pointer: coarse)").matches;
+  let remoteCommand: PlayerCommand | null = null;
+  let remoteAt = 0;
+  let remoteBuy: string | undefined;
+  let remoteSlot: number | undefined;
+  let remoteFrame: Record<string, unknown> | undefined;
+  let positionReceivedAt = 0;
+  let lastInputAt = 0;
+  let lastInput: PlayerCommand | undefined;
+  let acknowledged = { sequence: -1, tick: 0, stream: "" };
+  const guestMotion = network && !host ? new GuestMotion() : undefined;
+  const relayEvents: SimEvent[] = [];
+  let remoteGrenades: ReturnType<typeof projectFrame>["grenades"] = [];
+  let lastSentFrame = -1;
+  let lastSentAt = 0;
+  let inputTick = 0;
+  let remoteTick = -1;
+  if (network) network.onPacket = packet => {
+    if (!record(packet)) return;
+    if (host && packet.type === "input") {
+      const input = readCommand(packet.command);
+      if (!input || typeof packet.sequence !== "number" || !Number.isSafeInteger(packet.sequence)
+        || packet.sequence < 0) return;
+      // A reload creates a fresh input stream. Only the active channel can deliver it.
+      if (typeof packet.stream !== "string" || packet.stream.length !== 36) return;
+      if (packet.stream !== remoteStream) { remoteStream = packet.stream; remoteTick = -1; }
+      if (packet.sequence <= remoteTick) return;
+      remoteTick = packet.sequence;
+      remoteCommand = input;
+      remoteAt = performance.now();
+      if (input.buy) remoteBuy = input.buy;
+      if (input.slot) remoteSlot = input.slot;
+    } else if (!host && packet.type === "frame") {
+      remoteFrame = packet;
+    } else if (!host && packet.type === "event") {
+      const event = readEvent(packet.event);
+      if (event) ingest(event);
+    }
+  };
+  let remoteStream = "";
+  const inputStream = network ? crypto.randomUUID() : "";
   let flyPos = { x: 0, y: 0, z: 0 };
   const currentLock = () => !!canvas && document.pointerLockElement === canvas;
   function clearInput() {
     keys.clear();
     presses.clear();
+    touchHeld.clear();
+    touchTapped.clear();
     slot = 0;
   }
   const fullscreen = () => !!document.fullscreenElement;
@@ -137,6 +204,7 @@ export async function createGame(
     ready = false;
     generation++;
     cancelAnimationFrame(raf);
+    clearInterval(hostTimer);
     raf = 0;
     roundListeners?.abort();
     roundListeners = null;
@@ -170,6 +238,7 @@ export async function createGame(
   }
   function exit() {
     destroy();
+    if (network) network.close(true);
     if (opts.onExit) opts.onExit();
     else location.assign(hubUrl());
   }
@@ -183,7 +252,7 @@ export async function createGame(
     }
   }
   function lock() {
-    if (!canvas || currentLock()) return;
+    if (!canvas || touch || currentLock()) return;
     try {
       const result = canvas.requestPointerLock?.();
       if (result)
@@ -247,7 +316,7 @@ export async function createGame(
     hud?.event(e);
     audio.play(e);
     if (e.type === "shot" && e.pos && e.end)
-      renderer?.shot(e.pos, e.end, e.weapon, e.actor === 0);
+      renderer?.shot(e.pos, e.end, e.weapon, e.actor === s.me.id);
     if (e.type === "tracer" && e.pos && e.end)
       renderer?.shot(e.pos, e.end, "pellet", false);
     if (e.type === "kill" && e.victim !== undefined && e.dir) {
@@ -268,7 +337,7 @@ export async function createGame(
     }
     if (e.type === "impact" && e.pos && e.normal)
       renderer?.impact(e.pos, e.normal);
-    if (opts.debug && e.type === "trace" && e.actor === 0 && e.pos && e.end)
+    if (opts.debug && e.type === "trace" && e.actor === s.me.id && e.pos && e.end)
       renderer?.trace(e.pos, e.end, e.message ?? "air");
     if ((e.type === "explosion" || e.type === "flash") && e.pos)
       renderer?.burst(e.pos, e.type);
@@ -331,6 +400,12 @@ export async function createGame(
         opts.seed ?? (Math.random() * 0xffffffff) >>> 0,
         opts.botsOnly,
       );
+      if (network) {
+        sim.remotePlayer = peerPlayer;
+        sim.viewer = host ? 0 : peerPlayer;
+        sim.players[0].name = network.launch.hostName;
+        sim.players[peerPlayer].name = network.launch.peerName;
+      }
       renderer = new engine.GameRenderer(canvas!, map);
       hud = new overlay.MatchHud(
         stage!,
@@ -338,16 +413,26 @@ export async function createGame(
         {
           resume,
           pause,
-          restart: () => {
-            void start(choice, true);
-          },
-          lobby: menuScreen,
+          restart: network ? exit : () => { void start(choice, true); },
+          lobby: network ? exit : menuScreen,
+          buy: network && !host ? item => {
+            network.send({ type: "input", sequence: ++inputTick, stream: inputStream,
+              command: { ...idle(yaw, pitch), buy: item } });
+            return "Purchase requested";
+          } : undefined,
           exit,
           settings: config,
         },
         opts.debug,
       );
-      sim.onEvent(ingest);
+      sim.onEvent(event => {
+        ingest(event);
+        if (host && event.type !== "trace" && event.type !== "matchEnd") {
+          if (network?.relayed) {
+            if (relayEvents.length < 12) relayEvents.push(event);
+          } else network?.send({ type: "event", event });
+        }
+      });
       status.remove();
       settings(c.settings);
       yaw = sim.me.yaw;
@@ -358,6 +443,14 @@ export async function createGame(
       wasLocked = currentLock();
       bindRound();
       ready = true;
+      if (host) {
+        hostTime = performance.now();
+        hostTimer = window.setInterval(() => {
+          const now = performance.now();
+          advanceMatch(Math.min(0.25, (now - hostTime) / 1000), now);
+          hostTime = now;
+        }, 1000 / 64);
+      }
       notify({ type: "ready" });
       raf = requestAnimationFrame(frame);
     } catch (error) {
@@ -410,6 +503,31 @@ export async function createGame(
     const bar = hud!,
       s = sim!,
       surface = canvas!;
+    if (touch) {
+      stage!.classList.add("csw-touch-game");
+      mountTouchControls(stage!, surface, {
+        hold(key, down) {
+          if (down && (paused || bar.mode)) return;
+          // Touch buttons name a default key; resolve it to an action so rebinding never moves them.
+          const action = touchAction(key);
+          if (!action) return;
+          if (action === "previous") {
+            if (down) slot = -1;
+          } else if (down) {
+            touchHeld.add(action);
+            touchTapped.add(action);
+          } else touchHeld.delete(action);
+        },
+        look(dx, dy) {
+          if (paused || bar.mode) return;
+          audio.unlock();
+          yaw += dx * 0.006;
+          pitch = Math.max(-1.55, Math.min(1.55, pitch - dy * 0.006));
+        },
+        buy: buyMenu,
+        pause,
+      }, ctrl.signal);
+    }
     stage!.addEventListener(
       "click",
       (e) => {
@@ -422,6 +540,7 @@ export async function createGame(
       "click",
       () => {
         if (!bar.mode) {
+          surface.focus({ preventScroll: true });
           audio.unlock();
           enterFullscreen();
           lock();
@@ -462,7 +581,8 @@ export async function createGame(
         if (!repeat && !bar.mode) bar.scoreboard();
         return true;
       }
-      if (!currentLock() || bar.mode) return true;
+      if ((!currentLock() && document.activeElement !== surface) || bar.mode)
+        return true;
       keys.add(code);
       if (!repeat) presses.add(code);
       slot = slots[action] ?? slot;
@@ -589,13 +709,18 @@ export async function createGame(
       "blur",
       () => {
         if (currentLock()) pause();
+        else clearInput();
       },
       opt,
     );
   }
   function command(): PlayerCommand {
-    const held = (a: Action) => binds[a].some((c) => keys.has(c)),
-      tapped = (a: Action) => held(a) || binds[a].some((c) => presses.has(c));
+    const held = (a: Action) =>
+        touchHeld.has(a) || binds[a].some((c) => keys.has(c)),
+      tapped = (a: Action) =>
+        held(a) ||
+        touchTapped.has(a) ||
+        binds[a].some((c) => presses.has(c));
     const x = Number(held("right")) - Number(held("left")),
       z = Number(held("forward")) - Number(held("back"));
     const cmd = {
@@ -614,6 +739,7 @@ export async function createGame(
     };
     slot = 0;
     presses.clear();
+    touchTapped.clear();
     if (fly) {
       flyPos.x += (x * Math.cos(yaw) + z * Math.sin(yaw)) * DT * 15;
       flyPos.z += (x * Math.sin(yaw) - z * Math.cos(yaw)) * DT * 15;
@@ -621,15 +747,11 @@ export async function createGame(
     }
     return cmd;
   }
-  function frame(now: number) {
-    const s = sim,
-      view = renderer,
-      bar = hud;
-    if (!s || !view || !bar || disposed) return;
-    const elapsed = Math.min(0.18, (now - prev) / 1000);
-    prev = now;
-    if (elapsed > 0) frameRate += (1 / elapsed - frameRate) * 0.04;
-    if (!paused) {
+  function advanceMatch(elapsed: number, now: number) {
+    const s = sim;
+    const bar = hud;
+    if (!s || !bar || disposed) return;
+    if ((!paused || network) && s.phase !== "finished") {
       acc += elapsed;
       while (acc >= DT) {
         if (round !== s.round) {
@@ -637,15 +759,78 @@ export async function createGame(
           pitch = 0;
           round = s.round;
         }
-        const c = command();
-        s.step(opts.botsOnly ? {} : { 0: c });
-        acc -= DT;
-        if (bar.mode === "Buy menu" && !s.canBuy(s.me)) {
-          bar.close();
-          bar.note("Buy period ended. Click to capture mouse.");
+        const local = paused ? idle(yaw, pitch) : command();
+        if (!network) s.step(opts.botsOnly ? {} : { 0: local });
+        else if (host) {
+          const peer = s.players[peerPlayer];
+          const recent = performance.now() - remoteAt < 400;
+          const remote = recent && remoteCommand ? remoteCommand : idle(peer.yaw, peer.pitch);
+          if (recent && (acknowledged.sequence !== remoteTick || acknowledged.stream !== remoteStream)) {
+            acknowledged = { sequence: remoteTick, tick: s.tick + 1, stream: remoteStream };
+          }
+          s.step({ 0: local, [peerPlayer]: { ...remote, buy: remoteBuy, slot: remoteSlot } });
+          remoteBuy = undefined;
+          remoteSlot = undefined;
+        } else {
+          const sequence = ++inputTick;
+          if (network.relayed) guestMotion?.advance(s, sequence, local, now);
+          const changed = !lastInput || (["moveX", "moveZ", "jump", "fire", "alt", "walk", "crouch", "use", "reload"] as const)
+            .some(key => local[key] !== lastInput?.[key]) || !!local.slot;
+          if (!network.relayed || now - lastInputAt >= 80 || changed) {
+            network.send({ type: "input", sequence, stream: inputStream, command: local });
+            lastInputAt = now;
+            lastInput = local;
+          }
         }
+        acc -= DT;
+      }
+      if (bar.mode === "Buy menu" && !s.canBuy(s.me)) {
+        bar.close();
+        bar.note("Buy period ended. Click to capture mouse.");
       }
     }
+    if (host && (s.phase === "finished"
+      ? lastSentFrame !== s.tick || now - lastSentAt >= 1000
+      : s.tick - lastSentFrame >= (network?.relayed ? 5 : 4))) {
+      network?.send({
+        type: "frame",
+        frame: projectFrame(s, network.relayed),
+        ack: { sequence: acknowledged.sequence, stream: acknowledged.stream,
+          age: Math.max(0, s.tick - acknowledged.tick) },
+        events: relayEvents.splice(0),
+      });
+      lastSentFrame = s.tick;
+      lastSentAt = now;
+    }
+  }
+
+  function frame(now: number) {
+    const s = sim, view = renderer, bar = hud;
+    if (!s || !view || !bar || disposed) return;
+    const elapsed = Math.min(0.18, (now - prev) / 1000);
+    prev = now;
+    if (elapsed > 0) frameRate += (1 / elapsed - frameRate) * 0.04;
+    const prediction = network?.relayed ? guestMotion : undefined;
+    if (prediction) prediction.updateCorrection(elapsed);
+    if (network && !host && remoteFrame) {
+      const prior = prediction?.capture(s);
+      const finished = s.phase === "finished";
+      const latest = applyFrame(s, remoteFrame.frame);
+      if (latest) {
+        if (prediction && prior) prediction.reconcile(s, prior, remoteFrame.ack, inputStream, now);
+        remoteGrenades = latest;
+        positionReceivedAt = now;
+        if (Array.isArray(remoteFrame.events)) {
+          for (const value of remoteFrame.events.slice(0, 12)) {
+            const event = readEvent(value);
+            if (event) ingest(event);
+          }
+        }
+        if (!finished && s.phase === "finished") ingest({ type: "matchEnd", message: s.result });
+      }
+      remoteFrame = undefined;
+    }
+    if (!host) advanceMatch(elapsed, now);
     const me = s.me;
     const watched = me.alive
       ? me
@@ -656,11 +841,14 @@ export async function createGame(
               Math.hypot(a.x - me.x, a.z - me.z) -
               Math.hypot(b.x - me.x, b.z - me.z),
           )[0] ?? me);
-    const alpha = Math.max(0, Math.min(1, acc / DT)),
+    const alpha = Math.max(0, Math.min(1, network && !host && positionReceivedAt
+      ? (now - positionReceivedAt) / (network.relayed ? 78.125 : 62.5)
+      : acc / DT)),
       lerp = (a: number, b: number) => a + (b - a) * alpha;
-    const x = lerp(watched.last.x, watched.x),
-      z = lerp(watched.last.z, watched.z);
-    const eyeTarget = watched.eye.y;
+    const predicted = watched === me && me.alive ? prediction?.position(s) : undefined;
+    const x = predicted?.x ?? lerp(watched.last.x, watched.x),
+      z = predicted?.z ?? lerp(watched.last.z, watched.z);
+    const eyeTarget = watched.eye.y + (predicted ? predicted.y - watched.y : 0);
     if (!aimEye || Math.abs(aimEye - eyeTarget) > 1.5) aimEye = eyeTarget;
     else
       aimEye +=
@@ -703,7 +891,7 @@ export async function createGame(
           : 0,
       alpha,
       bomb: s.bomb,
-      grenades: s.grenades.map((g) => ({
+      grenades: network && !host ? remoteGrenades : s.grenades.map((g) => ({
         ...g.body.translation(),
         type: g.type,
         id: g.id,
@@ -713,7 +901,7 @@ export async function createGame(
     };
     view.render(props);
     audio.updateListener(cam, cam.yaw, cam.pitch);
-    bar.update(watched, frameRate, currentLock(), reduced.matches);
+    bar.update(watched, frameRate, touch || currentLock(), reduced.matches);
     raf = requestAnimationFrame(frame);
   }
   window.addEventListener("resize", () => renderer?.resize(), { signal });

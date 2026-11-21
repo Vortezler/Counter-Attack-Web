@@ -2,7 +2,7 @@
 
 **CS Web (fan project)**
 
-A standalone, single-player browser FPS for desktop keyboard and mouse. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
+A browser FPS for desktop keyboard and mouse, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
 ## Play locally
 
@@ -56,7 +56,14 @@ Set the repository's Pages source to **GitHub Actions**. The **Deploy GitHub Pag
 
 [Play on GitHub Pages](https://vortezler.github.io/Counter-Attack-Web/)
 
-## Game Hub
+## Game Hub multiplayer
+
+Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, and wait for the creator to start it. Both players then select **Open match**. The creator plays CT and runs the simulation, and the guest plays T. Eight bots fill the remaining slots on Dust2 with normal difficulty. The existing solo menu includes both maps and difficulty settings.
+
+The match opens inside the Game Hub tab. Browsers share connection candidates while establishing direct WebRTC and use private Game Hub Realtime messages if a direct path is unavailable. On the relay, the guest sees local movement immediately and adjusts to the host's snapshots. The host resolves damage, purchases, and round outcomes over either connection. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
+
+On a touch device, use the on-screen buttons to move and act and drag the view to aim. Keep the host tab active on mobile because the browser can suspend it in the background. The host controls this casual match, so play with someone you trust.
+
 
 The standalone build works with no backend configuration. For guest restoration, copy `.env.example` to `.env.local` and set the same browser-safe Supabase URL and publishable key as Game Hub. Serve the two applications on the same origin for shared guest storage. The game stores local preferences under `cs-web:` and signs in no new users.
 
