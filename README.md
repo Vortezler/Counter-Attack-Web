@@ -1,4 +1,6 @@
-# CS Web (fan project)
+# Counter-Attack-Web
+
+**CS Web (fan project)**
 
 A standalone, single-player browser FPS for desktop keyboard and mouse. Choose Dust2 or Mirage, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
