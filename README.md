@@ -2,7 +2,7 @@
 
 **CS Web (fan project)**
 
-A standalone, single-player browser FPS for desktop keyboard and mouse. Choose Dust2 or Mirage, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
+A standalone, single-player browser FPS for desktop keyboard and mouse. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
 ## Play locally
 
@@ -21,7 +21,8 @@ Open [the game lobby](http://127.0.0.1:5177/cs-web/). Choose a callsign and **St
 | Shift / Ctrl / Space | Walk / crouch / jump |
 | Left mouse / right mouse | Fire / cycle scope zoom |
 | R / Q / wheel | Reload / previous equipment / cycle equipment |
-| 1 / 2 / 4 / 5 | Primary / pistol / grenade / carried objective |
+| 1 / 2 / 4 / 5 | Primary / pistol / cycle grenades (HE, flash, smoke, molotov) / carried objective |
+| Esc | Leave fullscreen and pause; every other bind can be changed under Controls |
 | Hold and release mouse with a grenade | Throw after the pin pull. Left gives a full throw, right a lob, both a medium throw. |
 | Hold E | Plant at A or B while carrying the objective, or defuse beside it |
 | B / Tab / Esc | Buy menu / hold scoreboard / pause |
@@ -41,6 +42,8 @@ Open the buy menu in your spawn during the 15-second freeze or the first 20 seco
 | --- | --- |
 | `npm test` | Damage, penetration, utility, movement, economy, objectives, round transitions, navigation, identity, and CSP |
 | `npm run check:map` | Spawn-to-site connectivity, link clearance, route timings |
+| `npx tsx scripts/sightlines.ts` | No line of sight between the two spawn buy zones on any map (also covered by `npm test`) |
+| `node scripts/capture.mjs` | With `npm run dev` running, re-renders lobby art for Nuke, Inferno and Vertigo |
 | `npm run map:svg -- mirage` | Regenerate a map schematic under `docs/maps` |
 | `npm run test:soak` | Deterministic ten-bot matches on both maps with objective and tick statistics |
 | `npm run build && npm run test:browser` | Match setup, buying, shooting, reloading, scoreboard, pause, and repeated WebGL teardown |

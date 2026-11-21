@@ -1,0 +1,62 @@
+.csw-binds {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.csw-bindlist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 18px;
+  max-height: min(52vh, 460px);
+  overflow-y: auto;
+  padding-right: 6px;
+}
+.csw-bindrow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid #ffffff14;
+  font-size: 0.86em;
+}
+.csw-binds .csw-bindrow button,
+.csw-bindrow kbd {
+  min-width: 96px;
+  padding: 5px 10px;
+  font:
+    600 0.92em Consolas,
+    monospace;
+  text-align: center;
+  color: #eaf2d8;
+  background: #262d27;
+  border: 1px solid #5a6652;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.csw-bindrow kbd {
+  cursor: default;
+  opacity: 0.7;
+}
+.csw-binds .csw-bindrow button:hover,
+.csw-binds .csw-bindrow button:focus-visible {
+  border-color: #c8f07a;
+}
+.csw-binds .csw-bindrow button.csw-waiting {
+  color: #1b2016;
+  background: #c8f07a;
+  border-color: #c8f07a;
+}
+.csw-bindnote {
+  margin: 0;
+  font-size: 0.8em;
+  color: #b9c4a9;
+}
+.csw-binds .csw-bindreset {
+  align-self: flex-start;
+}
+@media (max-width: 640px) {
+  .csw-bindlist {
+    grid-template-columns: 1fr;
+  }
+}

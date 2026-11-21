@@ -14,6 +14,19 @@ import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
 import type { MapId } from "./world";
 import { catalog, isGun } from "./config/weapons";
+import { actionFor, binds, isBound, lockedKeys, type Action } from "./keybinds";
+
+type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
+const keyboard = () =>
+  (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
+const slots: Partial<Record<Action, number>> = {
+  primary: 1,
+  pistol: 2,
+  grenade: 4,
+  bomb: 5,
+  previous: -1,
+  next: 9,
+};
 export interface GameOptions extends Partial<Omit<MenuChoice, "settings">> {
   seed?: number;
   showMenu?: boolean;
@@ -45,7 +58,7 @@ export async function createGame(
   container.append(root);
   const lifetime = new AbortController(),
     signal = lifetime.signal;
-  const audio = new GameAudio((a, b) => !!sim && !sim.visible(a, b));
+  const audio = new GameAudio((a, b) => !!sim && !sim.visible(a, b, false));
   let choice: MenuChoice = {
     map: opts.map ?? "dust2",
     side: opts.side ?? "CT",
@@ -71,9 +84,8 @@ export async function createGame(
     pitch = 0,
     round = 0;
   let aimEye = 0,
-    mouseLeft = false,
-    mouseRight = false,
     slot = 0,
+    wantFullscreen = false,
     wasLocked = false,
     ready = false;
   const keys = new Set<string>(),
@@ -86,8 +98,36 @@ export async function createGame(
   function clearInput() {
     keys.clear();
     presses.clear();
-    mouseLeft = mouseRight = false;
     slot = 0;
+  }
+  const fullscreen = () => !!document.fullscreenElement;
+  /** Fullscreen plus a keyboard lock so browser shortcuts reach the game; Esc stays with the browser. */
+  function enterFullscreen() {
+    if (!choice.settings.fullscreen) return;
+    wantFullscreen = true;
+    const lockKeys = () => {
+      if (fullscreen())
+        void keyboard()
+          ?.lock(lockedKeys)
+          .catch(() => {});
+    };
+    if (fullscreen()) return lockKeys();
+    try {
+      void root
+        .requestFullscreen?.({ navigationUI: "hide" })
+        .then(() => {
+          lockKeys();
+          lock();
+        })
+        .catch(() => {});
+    } catch {
+      /* Fullscreen is optional, e.g. inside a sandboxed frame. */
+    }
+  }
+  function leaveFullscreen() {
+    wantFullscreen = false;
+    keyboard()?.unlock();
+    if (fullscreen()) void document.exitFullscreen?.().catch(() => {});
   }
   function release() {
     if (currentLock()) document.exitPointerLock?.();
@@ -103,6 +143,7 @@ export async function createGame(
     menu?.destroy();
     menu = null;
     release();
+    leaveFullscreen();
     wasLocked = false;
     hud?.destroy();
     hud = null;
@@ -159,6 +200,7 @@ export async function createGame(
     clearInput();
     hud.pause();
     release();
+    leaveFullscreen();
   }
   function resume() {
     if (!sim || !hud || sim.phase === "finished") return;
@@ -168,6 +210,7 @@ export async function createGame(
     prev = performance.now();
     audio.unlock();
     canvas?.focus();
+    enterFullscreen();
     lock();
   }
   function config() {
@@ -177,6 +220,7 @@ export async function createGame(
       choice.settings.volume,
       choice.settings.sensitivity,
       choice.settings.shadows,
+      choice.settings.fullscreen,
       (key, v) => settings({ ...choice.settings, [key]: v }),
     );
   }
@@ -204,6 +248,24 @@ export async function createGame(
     audio.play(e);
     if (e.type === "shot" && e.pos && e.end)
       renderer?.shot(e.pos, e.end, e.weapon, e.actor === 0);
+    if (e.type === "tracer" && e.pos && e.end)
+      renderer?.shot(e.pos, e.end, "pellet", false);
+    if (e.type === "kill" && e.victim !== undefined && e.dir) {
+      // Topple away from the attacker, but pick a direction with room to fall.
+      const v = s.players[e.victim],
+        chest = { x: v.x, y: v.y + 0.55, z: v.z },
+        { x, z } = e.dir;
+      const turn = (a: number) => ({
+        x: x * Math.cos(a) - z * Math.sin(a),
+        z: x * Math.sin(a) + z * Math.cos(a),
+      });
+      const dir =
+        [0, 0.6, -0.6, 1.57, -1.57, Math.PI]
+          .map(turn)
+          .find((d) => !s.physics.ray(chest, { x: d.x, y: 0, z: d.z }, 1.9)) ??
+        e.dir;
+      renderer?.death(e.victim, dir, !!e.head, s.time);
+    }
     if (e.type === "impact" && e.pos && e.normal)
       renderer?.impact(e.pos, e.normal);
     if (opts.debug && e.type === "trace" && e.actor === 0 && e.pos && e.end)
@@ -241,13 +303,12 @@ export async function createGame(
       "Loading " +
       (opts.scene === "range"
         ? "practice range"
-        : choice.map === "dust2"
-          ? "Dust2"
-          : "Mirage") +
+        : choice.map.charAt(0).toUpperCase() + choice.map.slice(1)) +
       "…";
     stage.append(status);
     if (gesture) {
       audio.unlock();
+      enterFullscreen();
       lock();
     }
     try {
@@ -362,6 +423,7 @@ export async function createGame(
       () => {
         if (!bar.mode) {
           audio.unlock();
+          enterFullscreen();
           lock();
         }
       },
@@ -377,6 +439,44 @@ export async function createGame(
       },
       opt,
     );
+    document.addEventListener(
+      "fullscreenchange",
+      () => {
+        if (fullscreen()) return;
+        keyboard()?.unlock();
+        // Esc left fullscreen: hand the browser back and show the pause menu.
+        if (wantFullscreen && !paused && s.phase !== "finished") pause();
+        wantFullscreen = false;
+      },
+      opt,
+    );
+    /** Handles a bound key or mouse button going down; returns whether it was a game input. */
+    const press = (code: string, repeat: boolean) => {
+      const action = actionFor(code);
+      if (!action) return false;
+      if (action === "buy") {
+        if (!repeat) buyMenu();
+        return true;
+      }
+      if (action === "scoreboard") {
+        if (!repeat && !bar.mode) bar.scoreboard();
+        return true;
+      }
+      if (!currentLock() || bar.mode) return true;
+      keys.add(code);
+      if (!repeat) presses.add(code);
+      slot = slots[action] ?? slot;
+      return true;
+    };
+    const unpress = (code: string) => {
+      keys.delete(code);
+      if (isBound("scoreboard", code) && bar.mode === "Scoreboard") {
+        bar.close();
+        surface.focus();
+      }
+    };
+    const playing = () =>
+      !paused && s.phase !== "finished" && (currentLock() || fullscreen());
     document.addEventListener(
       "mousemove",
       (e) => {
@@ -402,14 +502,8 @@ export async function createGame(
       "mousedown",
       (e) => {
         if (currentLock() && !paused && !bar.mode) {
-          if (e.button === 0) {
-            mouseLeft = true;
-            presses.add("fire");
-          }
-          if (e.button === 2) {
-            mouseRight = true;
-            presses.add("alt");
-          }
+          e.preventDefault();
+          press("Mouse" + e.button, false);
         }
       },
       opt,
@@ -417,8 +511,16 @@ export async function createGame(
     document.addEventListener(
       "mouseup",
       (e) => {
-        if (e.button === 0) mouseLeft = false;
-        if (e.button === 2) mouseRight = false;
+        // Back/forward thumb buttons would otherwise navigate away mid-match.
+        if (playing() && (e.button === 3 || e.button === 4)) e.preventDefault();
+        unpress("Mouse" + e.button);
+      },
+      opt,
+    );
+    document.addEventListener(
+      "auxclick",
+      (e) => {
+        if (playing()) e.preventDefault();
       },
       opt,
     );
@@ -442,65 +544,37 @@ export async function createGame(
           else pause();
           return;
         }
+        // While playing, game binds win over browser shortcuts (Ctrl+W, Ctrl+S, Alt, F5…).
+        // Menus keep Tab and Enter so the armory stays keyboard navigable.
+        if (
+          playing() &&
+          (!bar.mode ||
+            bar.mode === "Scoreboard" ||
+            e.ctrlKey ||
+            e.altKey ||
+            e.metaKey ||
+            /^F\d+$/.test(e.code)) &&
+          e.code !== "F12"
+        )
+          e.preventDefault();
         if (paused || s.phase === "finished") return;
         if (bar.mode === "Buy menu") {
-          if (e.code === "KeyB" && !e.repeat) resume();
-          if (/^Digit[1-6]$/.test(e.code)) {
+          if (isBound("buy", e.code) && !e.repeat) resume();
+          if (/^Digit[1-7]$/.test(e.code)) {
             bar.tab = Number(e.code.slice(-1)) - 1;
             bar.shop();
           }
           return;
         }
-        if (e.code === "KeyB" && !e.repeat) {
-          buyMenu();
-          return;
-        }
-        if (
-          e.code === "Tab" &&
-          (currentLock() || document.activeElement === surface)
-        ) {
-          e.preventDefault();
-          if (!e.repeat) bar.scoreboard();
-          return;
-        }
-        if (!currentLock()) return;
-        if (
-          [
-            "Space",
-            "ControlLeft",
-            "ControlRight",
-            "ShiftLeft",
-            "ShiftRight",
-            "KeyW",
-            "KeyA",
-            "KeyS",
-            "KeyD",
-            "KeyR",
-            "KeyE",
-            "Digit1",
-            "Digit2",
-            "Digit4",
-            "Digit5",
-            "KeyQ",
-          ].includes(e.code)
-        ) {
-          e.preventDefault();
-          keys.add(e.code);
-          if (!e.repeat) presses.add(e.code);
-          if (e.code.startsWith("Digit")) slot = Number(e.code.slice(-1));
-          else if (e.code === "KeyQ") slot = -1;
-        }
+        if (press(e.code, e.repeat)) e.preventDefault();
       },
       opt,
     );
     document.addEventListener(
       "keyup",
       (e) => {
-        keys.delete(e.code);
-        if (e.code === "Tab" && bar.mode === "Scoreboard") {
-          bar.close();
-          surface.focus();
-        }
+        if (playing() && !bar.mode) e.preventDefault();
+        unpress(e.code);
       },
       opt,
     );
@@ -520,20 +594,22 @@ export async function createGame(
     );
   }
   function command(): PlayerCommand {
-    const x = Number(keys.has("KeyD")) - Number(keys.has("KeyA")),
-      z = Number(keys.has("KeyW")) - Number(keys.has("KeyS"));
+    const held = (a: Action) => binds[a].some((c) => keys.has(c)),
+      tapped = (a: Action) => held(a) || binds[a].some((c) => presses.has(c));
+    const x = Number(held("right")) - Number(held("left")),
+      z = Number(held("forward")) - Number(held("back"));
     const cmd = {
       moveX: fly ? 0 : x,
       moveZ: fly ? 0 : z,
       yaw,
       pitch,
-      fire: mouseLeft || presses.has("fire"),
-      alt: mouseRight || presses.has("alt"),
-      jump: keys.has("Space") || presses.has("Space"),
-      walk: keys.has("ShiftLeft") || keys.has("ShiftRight"),
-      crouch: keys.has("ControlLeft") || keys.has("ControlRight"),
-      use: keys.has("KeyE"),
-      reload: keys.has("KeyR") || presses.has("KeyR"),
+      fire: tapped("fire"),
+      alt: tapped("alt"),
+      jump: tapped("jump"),
+      walk: held("walk"),
+      crouch: held("crouch"),
+      use: held("use"),
+      reload: tapped("reload"),
       slot,
     };
     slot = 0;
@@ -632,6 +708,8 @@ export async function createGame(
         type: g.type,
         id: g.id,
       })),
+      smokes: s.smokes,
+      fires: s.fires,
     };
     view.render(props);
     audio.updateListener(cam, cam.yaw, cam.pitch);

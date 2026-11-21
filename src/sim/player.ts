@@ -40,12 +40,16 @@ export class Player {
   money = 800;
   kills = 0;
   deaths = 0;
+  headshots = 0;
+  roundKills = 0;
   primary: Magazine | null = null;
   pistol = magazine("glock");
   weapon: Weapon = "glock";
   previous: Weapon = "glock";
   he = 0;
   flash = 0;
+  smoke = 0;
+  molly = 0;
   scoped = 0;
   ground = true;
   landing = 0;
@@ -73,6 +77,7 @@ export class Player {
   aimNoise = 0;
   patrol: "A" | "B" = "A";
   nadeUsed = false;
+  smokeUsed = false;
   heard: Vec3 | null = null;
   staging: { x: number; z: number } | null = null;
   constructor(
@@ -114,6 +119,8 @@ export class Player {
     this.kit = false;
     this.he = 0;
     this.flash = 0;
+    this.smoke = 0;
+    this.molly = 0;
   }
   respawn(pos: Vec3 & { yaw: number }, fresh: boolean) {
     if (!this.alive || fresh) this.resetGear();
@@ -139,6 +146,8 @@ export class Player {
     this.repath = this.seen = this.stuck = this.nextVision = 0;
     this.heard = null;
     this.nadeUsed = false;
+    this.smokeUsed = false;
+    this.roundKills = 0;
     this.lastCmd = idle(pos.yaw);
     this.weapon = this.primary?.id ?? this.pistol.id;
     for (const m of [this.pistol, this.primary])

@@ -7,8 +7,16 @@ import {
   magazine,
   shop,
   weaponName,
+  pellets,
+  scopes,
+  semiAuto,
+  killReward,
+  isNade,
+  nadeLimit,
+  nades,
   type Item,
   type Gun,
+  type Nade,
   type Weapon,
 } from "../config/weapons";
 import { patterns } from "../config/recoilPatterns";
@@ -45,15 +53,44 @@ export interface SimEvent {
   amount?: number;
   wallbang?: boolean;
   head?: boolean;
+  dir?: { x: number; z: number };
 }
 interface Grenade {
   id: number;
-  type: "he" | "flash";
+  type: Nade;
   owner: number;
   body: RigidBody;
+  born: number;
   expires: number;
   lastVy: number;
 }
+export interface Smoke {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  born: number;
+  until: number;
+}
+export interface Fire {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  r: number;
+  born: number;
+  until: number;
+  owner: number;
+  team: Team;
+  next: number;
+}
+export const SMOKE_TIME = 18,
+  FIRE_TIME = 7;
+type Hits = Map<
+  number,
+  { hp: number; armor: number; head: boolean; wall: boolean }
+>;
 export const inside = (
   p: Vec3,
   r: { x: number; z: number; w: number; d: number; y: number },
@@ -90,6 +127,8 @@ export class Sim {
   worker = -1;
   action = "";
   grenades: Grenade[] = [];
+  smokes: Smoke[] = [];
+  fires: Fire[] = [];
   nextGrenade = 0;
   lastBeep = 0;
   traceInfo = "";
@@ -151,6 +190,8 @@ export class Sim {
   startRound(fresh = false) {
     for (const g of this.grenades) this.physics.world.removeRigidBody(g.body);
     this.grenades = [];
+    this.smokes = [];
+    this.fires = [];
     this.bomb = null;
     this.plantedSite = "";
     this.worker = -1;
@@ -182,19 +223,9 @@ export class Sim {
               ? "B"
               : "A"
             : main;
-      if (p.team === "T" && this.map.id !== "range") {
-        const via =
-          p.patrol === "B"
-            ? this.map.id === "dust2"
-              ? "Upper Tunnels"
-              : "Apartments"
-            : idx % 3 === 1
-              ? this.map.id === "dust2"
-                ? "Short A"
-                : "Connector"
-              : this.map.id === "dust2"
-                ? "Long Doors"
-                : "Palace";
+      const routes = this.map.staging?.[p.patrol];
+      if (p.team === "T" && routes?.length) {
+        const via = routes[idx % routes.length];
         p.staging = this.map.callouts.find((n) => n.name === via) ?? null;
       } else p.staging = null;
     }
@@ -211,26 +242,62 @@ export class Sim {
     this.emit({ type: "roundStart" });
   }
   botBuy(p: Player) {
-    if (p.money < 2000 && this.losses[p.team]) return;
+    const eco = p.money < 2000 && this.losses[p.team] > 0;
+    if (eco && (p.primary || p.money < 1050 || this.rng() < 0.6)) return;
+    if (!p.primary) {
+      const r = this.rng();
+      const pick = (table: [number, Gun][], fallback: Gun) =>
+        table.find(([odds]) => r < odds)?.[1] ?? fallback;
+      const wish: Gun[] = eco
+        ? [this.rng() < 0.5 ? "nova" : "p90", "nova"]
+        : p.team === "T"
+          ? [
+              pick(
+                [
+                  [0.12, "awp"],
+                  [0.22, "ssg"],
+                  [0.31, "p90"],
+                  [0.36, "xm"],
+                  [0.4, "nova"],
+                ],
+                "ak",
+              ),
+              "ak",
+              "ssg",
+              "p90",
+              "nova",
+            ]
+          : [
+              pick(
+                [
+                  [0.12, "awp"],
+                  [0.18, "ssg"],
+                  [0.25, "p90"],
+                  [0.3, "xm"],
+                  [0.46, "aug"],
+                  [0.72, "m4a4"],
+                ],
+                "m4",
+              ),
+              "m4a4",
+              "m4",
+              "ssg",
+              "p90",
+              "nova",
+            ];
+      for (const gun of wish) if (this.buy(p, gun) === "Purchased") break;
+    }
     for (const item of [
       "helmet",
-      ...(p.primary
-        ? []
-        : [this.rng() < 0.15 ? "awp" : "", p.team === "T" ? "ak" : "m4"]),
       "kevlar",
       ...(!p.primary ? ["deagle"] : []),
       "kit",
-      "he",
+      "smoke",
+      this.rng() < 0.55 ? "molly" : "he",
       "flash",
-    ] as Item[]) {
-      if (
-        item &&
-        this.buy(p, item) === "Purchased" &&
-        isGun(item) &&
-        catalog[item].slot === 1
-      )
-        p.weapon = item;
-    }
+      "he",
+    ] as Item[])
+      this.buy(p, item);
     if (p.primary) p.weapon = p.primary.id;
   }
   canBuy(p: Player) {
@@ -250,8 +317,9 @@ export class Sim {
       return "Other team only";
     if (
       (g && (p.primary?.id === item || p.pistol.id === item)) ||
-      (item === "he" && p.he >= 1) ||
-      (item === "flash" && p.flash >= 2) ||
+      (isNade(item) &&
+        (p[item] >= nadeLimit[item] ||
+          nades.reduce((n, k) => n + p[k], 0) >= 4)) ||
       (item === "kit" && p.kit) ||
       (item === "kevlar" && p.armor >= 100) ||
       (item === "helmet" && p.armor >= 100 && p.helmet)
@@ -265,7 +333,7 @@ export class Sim {
       if (catalog[item].slot === 1) p.primary = mag;
       else p.pistol = mag;
       this.equip(p, item);
-    } else if (item === "he" || item === "flash") p[item]++;
+    } else if (isNade(item)) p[item]++;
     else if (item === "kit") p.kit = true;
     else {
       p.armor = 100;
@@ -288,8 +356,7 @@ export class Sim {
     const items: Weapon[] = [
       ...(p.primary ? [p.primary.id] : []),
       p.pistol.id,
-      ...(p.he ? ["he" as const] : []),
-      ...(p.flash ? ["flash" as const] : []),
+      ...nades.filter((k) => p[k] > 0),
       ...(this.carrier === p.id ? ["bomb" as const] : []),
     ];
     const selected =
@@ -298,13 +365,7 @@ export class Sim {
         : slot === 2
           ? p.pistol.id
           : slot === 4
-            ? p.weapon === "he" && p.flash
-              ? "flash"
-              : p.he
-                ? "he"
-                : p.flash
-                  ? "flash"
-                  : undefined
+            ? this.nextNade(p)
             : slot === 5 && this.carrier === p.id
               ? "bomb"
               : slot === -1 && items.includes(p.previous)
@@ -318,6 +379,12 @@ export class Sim {
                     ]
                   : undefined;
     if (selected) this.equip(p, selected);
+  }
+  nextNade(p: Player): Nade | undefined {
+    const owned = nades.filter((k) => p[k] > 0);
+    if (!owned.length) return undefined;
+    const at = isNade(p.weapon) ? owned.indexOf(p.weapon) : -1;
+    return owned[(at + 1) % owned.length];
   }
   siteAt(p: Vec3) {
     return inside(p, this.map.sites.A)
@@ -518,7 +585,13 @@ export class Sim {
   }
   move(p: Player, c: PlayerCommand) {
     const speed =
-      (p.scoped ? 100 : isGun(p.weapon) ? catalog[p.weapon].speed : 245) *
+      (p.scoped
+        ? p.weapon === "aug"
+          ? 150
+          : 100
+        : isGun(p.weapon)
+          ? catalog[p.weapon].speed
+          : 245) *
       U *
       (c.crouch ? 0.34 : c.walk ? 0.52 : 1);
     const sync = p.ground;
@@ -597,7 +670,7 @@ export class Sim {
   }
   operateWeapon(p: Player, c: PlayerCommand) {
     if (p.drawEnd > this.time || p.reloadEnd) return;
-    if (p.weapon === "he" || p.weapon === "flash") {
+    if (isNade(p.weapon)) {
       if ((c.fire || c.alt) && !p.windup) p.windup = this.time;
       if (p.windup && !c.fire && !c.alt) {
         if (this.time - p.windup >= 0.3)
@@ -611,20 +684,12 @@ export class Sim {
       return;
     }
     if (!isGun(p.weapon)) return;
-    if (
-      p.weapon === "awp" &&
-      c.alt &&
-      !p.lastCmd.alt &&
-      this.time - p.lastFire > 0.15
-    )
-      p.scoped = (p.scoped + 1) % 3;
+    const levels = scopes[p.weapon] ?? 0;
+    if (levels && c.alt && !p.lastCmd.alt && this.time - p.lastFire > 0.15)
+      p.scoped = (p.scoped + 1) % (levels + 1);
     const m = p.mag;
     if (!m || !c.fire || this.time < p.nextFire || m.ammo <= 0) return;
-    if (
-      (p.weapon === "glock" || p.weapon === "deagle" || p.weapon === "awp") &&
-      p.lastCmd.fire
-    )
-      return;
+    if (semiAuto.has(p.weapon) && p.lastCmd.fire) return;
     const w = catalog[p.weapon];
     m.ammo--;
     p.nextFire = Math.max(this.time - DT, p.nextFire) + 60 / w.rpm;
@@ -632,10 +697,29 @@ export class Sim {
     p.lastFire = this.time;
     p.index++;
     p.penalty += w.spread[4];
-    p.scoped = 0;
+    if (p.weapon !== "aug") p.scoped = 0;
   }
   shoot(p: Player, g: Gun) {
-    const spread = this.spread(p, g) * DEG * Math.sqrt(this.rng()),
+    const hits: Hits = new Map();
+    const count = pellets[g] ?? 1;
+    let end: Vec3 = p.eye;
+    for (let k = 0; k < count; k++) {
+      const e = this.bullet(p, g, hits, count > 1);
+      if (k === 0) end = e;
+      else this.emit({ type: "tracer", actor: p.id, pos: p.eye, end: e });
+    }
+    for (const [id, h] of hits) {
+      const v = this.players[id];
+      v.armor = Math.max(0, h.armor);
+      this.hurt(v, h.hp, p, g, h.wall, h.head ? "head" : "chest");
+    }
+    this.hear(p, g === "m4" ? 20 : 45);
+    this.emit({ type: "shot", actor: p.id, pos: p.eye, end, weapon: g });
+  }
+  /** Traces one projectile, accumulating damage per victim so shotgun pellets land as one hit. */
+  bullet(p: Player, g: Gun, hits: Hits, pellet: boolean) {
+    const roll = Math.sqrt(this.rng()),
+      spread = this.spread(p, g) * DEG * (pellet ? 0.3 + 0.7 * roll : roll),
       angle = this.rng() * 2 * Math.PI;
     const yaw = p.yaw + 2 * p.punchY * DEG + spread * Math.cos(angle),
       pitch = p.pitch + 2 * p.punchX * DEG + spread * Math.sin(angle);
@@ -648,7 +732,7 @@ export class Sim {
       travel = 0,
       power: number = catalog[g].damage,
       walls = 0;
-    const max = (g === "glock" ? 4096 : 8192) * U;
+    const max = (g === "glock" ? 4096 : pellet ? 3000 : 8192) * U;
     let end = advance(o, dir, max);
     const ignore = new Set([p.id]);
     for (let i = 0; i < 16 && travel < max; i++) {
@@ -662,9 +746,18 @@ export class Sim {
         ignore.add(victim.id);
         const v = this.players[victim.id];
         if (p.team !== v.team && v.alive) {
-          const d = damage(power, g, travel, victim.group, v.armor, v.helmet);
-          v.armor -= d.armor;
-          this.hurt(v, d.hp, p, g, walls > 0, victim.group);
+          const acc = hits.get(v.id) ?? {
+            hp: 0,
+            armor: v.armor,
+            head: false,
+            wall: false,
+          };
+          const d = damage(power, g, travel, victim.group, acc.armor, v.helmet);
+          acc.hp += d.hp;
+          acc.armor -= d.armor;
+          acc.head ||= victim.group === "head";
+          acc.wall ||= walls > 0;
+          hits.set(v.id, acc);
         }
         power *= 0.9;
         o = advance(point, dir, 0.002);
@@ -711,8 +804,7 @@ export class Sim {
       o = advance(point, dir, thick + 0.002);
       travel += thick + 0.002;
     }
-    this.hear(p, g === "m4" ? 20 : 45);
-    this.emit({ type: "shot", actor: p.id, pos: p.eye, end, weapon: g });
+    return end;
   }
   hurt(
     v: Player,
@@ -743,8 +835,13 @@ export class Sim {
     }
     if (p && p.team !== v.team) {
       p.kills++;
-      p.money = capMoney(p.money + (weapon === "awp" ? 100 : 300));
+      p.roundKills++;
+      if (group === "head") p.headshots++;
+      p.money = capMoney(p.money + killReward(weapon));
     }
+    const dx = p ? v.x - p.x : -Math.sin(v.yaw),
+      dz = p ? v.z - p.z : Math.cos(v.yaw),
+      len = Math.hypot(dx, dz) || 1;
     this.emit({
       type: "kill",
       actor: p?.id,
@@ -752,9 +849,11 @@ export class Sim {
       weapon,
       wallbang,
       head: group === "head",
+      pos: { x: v.x, y: v.y + 0.9, z: v.z },
+      dir: { x: dx / len, z: dz / len },
     });
   }
-  throwGrenade(p: Player, type: "he" | "flash", speed: number) {
+  throwGrenade(p: Player, type: Nade, speed: number) {
     if (!p[type]) return;
     p[type]--;
     const pitch = p.pitch + 10 * DEG,
@@ -774,83 +873,198 @@ export class Sim {
       type,
       owner: p.id,
       body: this.physics.grenade(origin, v),
-      expires: this.time + 1.6,
+      born: this.time,
+      expires:
+        this.time + (type === "smoke" ? 3.5 : type === "molly" ? 2.2 : 1.6),
       lastVy: v.y,
     });
     this.equip(p, p.primary?.id ?? p.pistol.id);
   }
-  visible(a: Vec3, b: Vec3) {
+  visible(a: Vec3, b: Vec3, smoke = true) {
     const x = b.x - a.x,
       y = b.y - a.y,
       z = b.z - a.z,
       d = Math.hypot(x, y, z);
-    return (
-      d < 0.01 ||
-      !this.physics.ray(
-        a,
-        { x: x / d, y: y / d, z: z / d },
-        Math.max(0, d - 0.02),
-      )
+    if (d < 0.01) return true;
+    if (smoke && this.smokeBetween(a, b)) return false;
+    return !this.physics.ray(
+      a,
+      { x: x / d, y: y / d, z: z / d },
+      Math.max(0, d - 0.02),
     );
+  }
+  /** Current radius of a smoke cloud: it blooms over a second and thins out at the end. */
+  smokeRadius(c: Smoke) {
+    const bloom = clamp((this.time - c.born) / 1.1, 0.2, 1),
+      fade = clamp((c.until - this.time) / 2, 0, 1);
+    return c.r * bloom * (0.35 + 0.65 * fade);
+  }
+  /** Line of sight through a smoke ellipsoid (flattened vertically) counts as blocked. */
+  smokeBetween(a: Vec3, b: Vec3) {
+    for (const c of this.smokes) {
+      const r = this.smokeRadius(c) * 0.94;
+      if (r < 0.6) continue;
+      const k = 1.35,
+        cy = c.y + 1.25;
+      const ax = a.x - c.x,
+        ay = (a.y - cy) * k,
+        az = a.z - c.z;
+      const dx = b.x - a.x,
+        dy = (b.y - a.y) * k,
+        dz = b.z - a.z;
+      const dd = dx * dx + dy * dy + dz * dz || 1;
+      const t = clamp(-(ax * dx + ay * dy + az * dz) / dd, 0, 1);
+      if (Math.hypot(ax + dx * t, ay + dy * t, az + dz * t) < r) return true;
+    }
+    return false;
+  }
+  inSmoke(p: Vec3) {
+    return this.smokes.some(
+      (c) =>
+        Math.hypot(p.x - c.x, (p.y - c.y - 1.25) * 1.35, p.z - c.z) <
+        this.smokeRadius(c),
+    );
+  }
+  floorBelow(p: Vec3, depth = 6) {
+    const hit = this.physics.ray(p, { x: 0, y: -1, z: 0 }, depth);
+    return hit ? p.y - hit.timeOfImpact : null;
   }
   stepGrenades() {
     for (let i = this.grenades.length - 1; i >= 0; i--) {
       const g = this.grenades[i];
-      if (this.time < g.expires) {
-        const vy = g.body.linvel().y;
-        if (g.lastVy < -1.3 && vy > 0)
-          this.emit({ type: "bounce", pos: g.body.translation() });
+      const age = this.time - g.born,
+        at = g.body.translation(),
+        vel = g.body.linvel();
+      let pop = this.time >= g.expires;
+      if (
+        g.type === "smoke" &&
+        age > 0.5 &&
+        Math.hypot(vel.x, vel.y, vel.z) < 0.35
+      )
+        pop = true;
+      if (
+        g.type === "molly" &&
+        age > 0.06 &&
+        vel.y < 0.6 &&
+        this.physics.ray(at, { x: 0, y: -1, z: 0 }, 0.17)
+      )
+        pop = true;
+      if (!pop) {
+        const vy = vel.y;
+        if (g.lastVy < -1.3 && vy > 0) this.emit({ type: "bounce", pos: at });
         g.lastVy = vy;
         continue;
       }
-      const o = g.body.translation();
-      o.y += 0.16;
-      this.emit({
-        type: g.type === "he" ? "explosion" : "flash",
-        pos: o,
-        actor: g.owner,
-      });
-      for (const p of this.players) {
-        if (!p.alive) continue;
-        const dist = Math.hypot(p.x - o.x, p.eye.y - o.y, p.z - o.z),
-          range = (g.type === "he" ? 350 : 1500) * U;
-        if (dist >= range) continue;
-        const eye = p.eye,
-          chest = { ...eye, y: eye.y - 0.48 };
-        const seen =
-          Number(this.visible(o, eye)) + Number(this.visible(o, chest));
-        if (!seen) continue;
-        if (g.type === "he") {
-          const raw = (98 * (1 - dist / range) ** 1.2 * seen) / 2;
-          const armor = Math.min(p.armor, raw * 0.25);
-          p.armor -= armor;
-          this.hurt(
-            p,
-            Math.round(raw - armor * 2),
-            this.players[g.owner],
-            "he",
-          );
-        } else {
-          const facing =
-            ((o.x - p.x) * Math.sin(p.yaw) * Math.cos(p.pitch) -
-              (o.z - p.z) * Math.cos(p.yaw) * Math.cos(p.pitch) +
-              (o.y - eye.y) * Math.sin(p.pitch)) /
-            (dist || 1);
-          const duration =
-            0.3 +
-            (4.57 *
-              clamp((facing + 1) / 1.6, 0.25, 1) *
-              (1 - dist / range) *
-              seen) /
-              2;
-          p.blinded = Math.max(p.blinded, this.time + duration);
-          p.blindDuration = duration;
-          if (p.id === 0)
-            this.emit({ type: "blind", actor: p.id, amount: duration });
-        }
-      }
       this.physics.world.removeRigidBody(g.body);
       this.grenades.splice(i, 1);
+      const o = { x: at.x, y: at.y + 0.16, z: at.z };
+      if (g.type === "smoke") this.popSmoke(g, o);
+      else if (g.type === "molly") this.ignite(g, o);
+      else this.detonate(g, o);
+    }
+    for (let i = this.smokes.length - 1; i >= 0; i--)
+      if (this.time >= this.smokes[i].until) this.smokes.splice(i, 1);
+    for (let i = this.fires.length - 1; i >= 0; i--) {
+      const f = this.fires[i];
+      if (this.time >= f.until) {
+        this.fires.splice(i, 1);
+        this.emit({ type: "fireOut", pos: { x: f.x, y: f.y, z: f.z } });
+        continue;
+      }
+      if (this.time < f.next) continue;
+      f.next = this.time + 0.25;
+      for (const p of this.players)
+        if (
+          p.alive &&
+          p.team !== f.team &&
+          Math.hypot(p.x - f.x, p.z - f.z) < f.r &&
+          Math.abs(p.y - f.y) < 1.4
+        )
+          this.hurt(p, 10, this.players[f.owner], "molly");
+    }
+  }
+  popSmoke(g: Grenade, o: Vec3) {
+    const floor = this.floorBelow(o, 3) ?? o.y - 0.2;
+    const cloud: Smoke = {
+      id: g.id,
+      x: o.x,
+      y: floor,
+      z: o.z,
+      r: 3.7,
+      born: this.time,
+      until: this.time + SMOKE_TIME,
+    };
+    this.smokes.push(cloud);
+    this.emit({ type: "smoke", pos: o, actor: g.owner });
+    for (let i = this.fires.length - 1; i >= 0; i--) {
+      const f = this.fires[i];
+      if (Math.hypot(f.x - cloud.x, f.z - cloud.z) < cloud.r + f.r * 0.4) {
+        this.fires.splice(i, 1);
+        this.emit({ type: "extinguish", pos: { x: f.x, y: f.y, z: f.z } });
+      }
+    }
+  }
+  ignite(g: Grenade, o: Vec3) {
+    const floor = this.floorBelow(o, 7);
+    this.emit({ type: "shatter", pos: o, actor: g.owner });
+    const spot = floor === null ? null : { x: o.x, y: floor, z: o.z };
+    if (!spot || this.inSmoke({ ...spot, y: spot.y + 0.5 })) {
+      if (spot) this.emit({ type: "extinguish", pos: spot });
+      return;
+    }
+    this.fires.push({
+      id: g.id,
+      ...spot,
+      r: 2.9,
+      born: this.time,
+      until: this.time + FIRE_TIME,
+      owner: g.owner,
+      team: this.players[g.owner].team,
+      next: this.time + 0.15,
+    });
+    this.emit({ type: "fire", pos: spot, amount: FIRE_TIME, actor: g.owner });
+  }
+  detonate(g: Grenade, o: Vec3) {
+    this.emit({
+      type: g.type === "he" ? "explosion" : "flash",
+      pos: o,
+      actor: g.owner,
+    });
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      const dist = Math.hypot(p.x - o.x, p.eye.y - o.y, p.z - o.z),
+        range = (g.type === "he" ? 350 : 1500) * U;
+      if (dist >= range) continue;
+      const eye = p.eye,
+        chest = { ...eye, y: eye.y - 0.48 };
+      const smoke = g.type === "flash";
+      const seen =
+        Number(this.visible(o, eye, smoke)) +
+        Number(this.visible(o, chest, smoke));
+      if (!seen) continue;
+      if (g.type === "he") {
+        const raw = (98 * (1 - dist / range) ** 1.2 * seen) / 2;
+        const armor = Math.min(p.armor, raw * 0.25);
+        p.armor -= armor;
+        this.hurt(p, Math.round(raw - armor * 2), this.players[g.owner], "he");
+      } else {
+        const facing =
+          ((o.x - p.x) * Math.sin(p.yaw) * Math.cos(p.pitch) -
+            (o.z - p.z) * Math.cos(p.yaw) * Math.cos(p.pitch) +
+            (o.y - eye.y) * Math.sin(p.pitch)) /
+          (dist || 1);
+        const duration =
+          0.3 +
+          (4.57 *
+            clamp((facing + 1) / 1.6, 0.25, 1) *
+            (1 - dist / range) *
+            seen) /
+            2;
+        p.blinded = Math.max(p.blinded, this.time + duration);
+        p.blindDuration = duration;
+        if (p.id === 0)
+          this.emit({ type: "blind", actor: p.id, amount: duration });
+      }
     }
   }
   finish(winner: Team, reason: string) {

@@ -53,6 +53,114 @@ export const catalog = {
     reset: 0.85,
     spread: [3.5, 3, 7, 9, 1],
   },
+  m4a4: {
+    name: "M4A4",
+    price: 3100,
+    team: "CT",
+    slot: 1,
+    damage: 33,
+    pen: 1.4,
+    limit: 70,
+    armor: 0.7,
+    range: 0.97,
+    rpm: 666,
+    mag: 30,
+    reserve: 90,
+    reload: 3.1,
+    speed: 225,
+    reset: 0.33,
+    spread: [0.28, 0.2, 2.1, 3.9, 0.11],
+  },
+  aug: {
+    name: "AUG",
+    price: 3300,
+    team: "CT",
+    slot: 1,
+    damage: 28,
+    pen: 1.8,
+    limit: 80,
+    armor: 0.9,
+    range: 0.98,
+    rpm: 600,
+    mag: 30,
+    reserve: 90,
+    reload: 3.8,
+    speed: 220,
+    reset: 0.33,
+    spread: [0.27, 0.2, 2.1, 3.9, 0.1],
+  },
+  ssg: {
+    name: "SSG 08",
+    price: 1700,
+    team: "",
+    slot: 1,
+    damage: 88,
+    pen: 2.5,
+    limit: 100,
+    armor: 0.85,
+    range: 0.98,
+    rpm: 48,
+    mag: 10,
+    reserve: 90,
+    reload: 3.7,
+    speed: 230,
+    reset: 0.6,
+    spread: [2.2, 1.8, 4.5, 1.1, 0.6],
+  },
+  p90: {
+    name: "P90",
+    price: 2350,
+    team: "",
+    slot: 1,
+    damage: 26,
+    pen: 1.38,
+    limit: 50,
+    armor: 0.69,
+    range: 0.86,
+    rpm: 857,
+    mag: 50,
+    reserve: 100,
+    reload: 3.3,
+    speed: 230,
+    reset: 0.3,
+    spread: [0.6, 0.45, 1.6, 3.5, 0.08],
+  },
+  nova: {
+    name: "Nova",
+    price: 1050,
+    team: "",
+    slot: 1,
+    damage: 26,
+    pen: 1,
+    limit: 20,
+    armor: 0.5,
+    range: 0.7,
+    rpm: 68,
+    mag: 8,
+    reserve: 32,
+    reload: 3.6,
+    speed: 220,
+    reset: 0.6,
+    spread: [3.6, 3.6, 4.6, 5.6, 0.5],
+  },
+  xm: {
+    name: "XM1014",
+    price: 2000,
+    team: "",
+    slot: 1,
+    damage: 20,
+    pen: 1,
+    limit: 20,
+    armor: 0.8,
+    range: 0.7,
+    rpm: 171,
+    mag: 7,
+    reserve: 32,
+    reload: 3.2,
+    speed: 215,
+    reset: 0.4,
+    spread: [4.2, 4.2, 5.2, 6.2, 0.4],
+  },
   negev: {
     name: "Negev",
     price: 1700,
@@ -109,16 +217,46 @@ export const catalog = {
   },
 } as const;
 export type Gun = keyof typeof catalog;
-export type Weapon = Gun | "he" | "flash" | "bomb";
+export type Nade = "he" | "flash" | "smoke" | "molly";
+export const nades: Nade[] = ["he", "flash", "smoke", "molly"];
+export const nadeLimit: Record<Nade, number> = {
+  he: 1,
+  flash: 2,
+  smoke: 1,
+  molly: 1,
+};
+export type Weapon = Gun | Nade | "bomb";
 export type Item = Exclude<Weapon, "bomb"> | "kevlar" | "helmet" | "kit";
 export const gear = {
   he: { name: "HE grenade", price: 300 },
   flash: { name: "Flashbang", price: 200 },
+  smoke: { name: "Smoke grenade", price: 300 },
+  molly: { name: "Molotov", price: 400 },
   kevlar: { name: "Kevlar vest", price: 650 },
   helmet: { name: "Kevlar + helmet", price: 1000 },
   kit: { name: "Defuse kit", price: 400 },
 };
 export const shop = { ...catalog, ...gear };
+/** Pellets per trigger pull (shotguns). */
+export const pellets: Partial<Record<Gun, number>> = { nova: 9, xm: 6 };
+/** Number of zoom levels; the first maps to 40° and the second to 10–15°. */
+export const scopes: Partial<Record<string, number>> = {
+  awp: 2,
+  ssg: 2,
+  aug: 1,
+};
+export const semiAuto = new Set<string>([
+  "glock",
+  "deagle",
+  "awp",
+  "ssg",
+  "nova",
+]);
+export function killReward(w: string) {
+  return w === "awp" ? 100 : w === "nova" || w === "xm" ? 900 : 300;
+}
+export const isNade = (key: string): key is Nade =>
+  (nades as string[]).includes(key);
 export function isGun(key: string): key is Gun {
   return Object.hasOwn(catalog, key);
 }

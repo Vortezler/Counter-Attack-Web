@@ -1,6 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { maps, type MapDef, type Vec3 } from "../src/world";
+import {
+  maps,
+  mapIds,
+  type GridMapId,
+  type MapDef,
+  type Vec3,
+} from "../src/world";
 
 const runSpeed = 250 * 0.0254;
 function nearest(map: MapDef, p: Pick<Vec3, "x" | "z">) {
@@ -50,7 +56,16 @@ function check(m: MapDef) {
     );
   }
   for (const [i, n] of m.nodes.entries()) {
-    if (solid(n)) error("node " + i + " in solid");
+    if (solid(n))
+      error(
+        "node " +
+          i +
+          " in solid (" +
+          Math.floor(n.x / 5) +
+          "," +
+          Math.floor(n.z / 5) +
+          ")",
+      );
     for (const j of n.links) {
       if (!m.nodes[j]?.links.includes(i))
         error("one-way link " + i + " to " + j);
@@ -64,7 +79,15 @@ function check(m: MapDef) {
             z: n.z + (b.z - n.z) * t,
           })
         )
-          error("blocked link " + i + " to " + j);
+          error(
+            "blocked link " +
+              i +
+              " to " +
+              j +
+              " (" +
+              [n.x, n.z, b.x, b.z].map((v) => Math.floor(v / 5)).join(",") +
+              ")",
+          );
       }
     }
   }
@@ -75,35 +98,51 @@ function check(m: MapDef) {
       if (d.some((v) => !Number.isFinite(v)))
         error(team + " spawn cannot reach all nodes");
     }
-  const timings: [string, string[], number, number][] =
-    m.id === "dust2"
-      ? [
-          [
-            "T to A via Long",
-            ["T Spawn", "Long Doors", "Long A", "A Site"],
-            12,
-            14,
-          ],
-          [
-            "T to B via Tunnels",
-            ["T Spawn", "Lower Tunnels", "Upper Tunnels", "B Site"],
-            13,
-            15,
-          ],
-          ["T to Mid Doors", ["T Spawn", "Mid Doors"], 8, 9],
-          ["CT to A", ["CT Spawn", "A Site"], 6, 7],
-          ["CT to B", ["CT Spawn", "B Site"], 5, 7],
-        ]
-      : [
-          ["T to A via Palace", ["T Spawn", "Palace", "A Site"], 11, 13],
-          [
-            "T to B via Apartments",
-            ["T Spawn", "Apartments", "B Site"],
-            12,
-            14,
-          ],
-          ["CT to A", ["CT Spawn", "A Site"], 6, 8],
-        ];
+  const all: Partial<Record<GridMapId, [string, string[], number, number][]>> =
+    {
+      dust2: [
+        [
+          "T to A via Long",
+          ["T Spawn", "Long Doors", "Long A", "A Site"],
+          12,
+          14,
+        ],
+        [
+          "T to B via Tunnels",
+          ["T Spawn", "Lower Tunnels", "Upper Tunnels", "B Site"],
+          13,
+          15,
+        ],
+        ["T to Mid Doors", ["T Spawn", "Mid Doors"], 8, 9],
+        ["CT to A", ["CT Spawn", "A Site"], 6, 7],
+        ["CT to B", ["CT Spawn", "B Site"], 5, 7],
+      ],
+      mirage: [
+        ["T to A via Palace", ["T Spawn", "Palace", "A Site"], 11, 13],
+        ["T to B via Apartments", ["T Spawn", "Apartments", "B Site"], 12, 14],
+        ["CT to A", ["CT Spawn", "A Site"], 6, 8],
+      ],
+      nuke: [
+        ["T to A via Lobby", ["T Spawn", "Lobby", "A Site"], 10, 13],
+        ["T to B via Ramp", ["T Spawn", "Lobby", "Ramp", "B Site"], 14, 18],
+        ["T to B via Secret", ["T Spawn", "Yard", "Secret", "B Site"], 12, 16],
+        ["CT to A", ["CT Spawn", "A Site"], 4, 7],
+        ["CT to B", ["CT Spawn", "B Site"], 4, 7],
+      ],
+      inferno: [
+        ["T to B via Banana", ["T Spawn", "Banana", "B Site"], 12, 16],
+        ["T to A via Apartments", ["T Spawn", "Apartments", "A Site"], 11, 15],
+        ["CT to A", ["CT Spawn", "A Site"], 4, 7],
+        ["CT to B", ["CT Spawn", "B Site"], 5, 8],
+      ],
+      vertigo: [
+        ["T to A via Ramp", ["T Spawn", "A Ramp", "A Site"], 11, 15],
+        ["T to B via Stairs", ["T Spawn", "B Stairs", "B Site"], 10, 14],
+        ["CT to A", ["CT Spawn", "A Site"], 4, 7],
+        ["CT to B", ["CT Spawn", "B Site"], 4, 7],
+      ],
+    };
+  const timings = all[m.id as GridMapId] ?? [];
   console.log(m.name + " · " + m.nodes.length + " connected nodes");
   for (const [name, labels, low, high] of timings) {
     const ids = labels.map((l) =>
@@ -218,11 +257,13 @@ function diagram(m: MapDef) {
   return lines.join("\n");
 }
 const [action = "check", mapId] = process.argv.slice(2);
-if (mapId && mapId !== "dust2" && mapId !== "mirage")
-  throw Error("Expected dust2 or mirage");
+if (mapId && !(mapIds as string[]).includes(mapId))
+  throw Error("Expected one of " + mapIds.join(", "));
 if (action !== "check" && action !== "svg")
   throw Error("Expected check or svg");
-const selected = mapId ? [maps[mapId]] : [maps.dust2, maps.mirage];
+const selected = mapId
+  ? [maps[mapId as GridMapId]]
+  : mapIds.map((id) => maps[id]);
 for (const map of selected) {
   if (action === "check") check(map);
   else {

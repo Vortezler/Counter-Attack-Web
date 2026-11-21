@@ -1,6 +1,15 @@
 import "./menu.css";
+import type { GridMapId } from "./world";
+import { mountBindEditor } from "./keybinds";
 
-export type LobbyMap = "dust2" | "mirage";
+export type LobbyMap = GridMapId;
+export const lobbyMaps: LobbyMap[] = [
+  "dust2",
+  "mirage",
+  "nuke",
+  "inferno",
+  "vertigo",
+];
 export type LobbySide = "CT" | "T";
 export type LobbyDifficulty = "easy" | "normal" | "hard";
 export interface MenuSettings {
@@ -8,6 +17,7 @@ export interface MenuSettings {
   volume: number;
   fov: number;
   shadows: boolean;
+  fullscreen: boolean;
   crosshair: "classic" | "dot";
   hudScale: number;
 }
@@ -31,6 +41,7 @@ export const defaultMenuSettings: MenuSettings = {
   volume: 0.65,
   fov: 90,
   shadows: true,
+  fullscreen: true,
   crosshair: "classic",
   hudScale: 1,
 };
@@ -82,6 +93,24 @@ const mapInfo = {
     region: "Kasbah",
     copy: "Fight for mid control between palace balconies and market arches.",
   },
+  nuke: {
+    name: "Nuke",
+    display: "NUKE",
+    region: "Reactor",
+    copy: "Indoor sites under a concrete roof, a silo yard outside, and Ramp linking it all.",
+  },
+  inferno: {
+    name: "Inferno",
+    display: "INFERNO",
+    region: "Village",
+    copy: "Hold the winding Banana lane or storm the apartments over the A balcony.",
+  },
+  vertigo: {
+    name: "Vertigo",
+    display: "VERTIGO",
+    region: "Skyline",
+    copy: "Fifty floors up: a ramp over scaffolding to A and a stairwell into B.",
+  },
 };
 const localRead = (key: string) => {
   try {
@@ -122,29 +151,13 @@ export function mergeSettings(
     volume: validNumber(s.volume, 0.65, 0, 1),
     fov: validNumber(s.fov, 90, 65, 120),
     shadows: typeof s.shadows === "boolean" ? s.shadows : true,
+    fullscreen: typeof s.fullscreen === "boolean" ? s.fullscreen : true,
     crosshair: s.crosshair === "dot" ? "dot" : "classic",
     hudScale: validNumber(s.hudScale, 1, 0.75, 1.5),
   };
 }
 const art = (map: LobbyMap, thumb = false) =>
-  `${import.meta.env.BASE_URL}art/${map}${thumb ? "-map" : ""}.webp`;
-const matchKeys: [string, string][] = [
-  ["W A S D", "Move"],
-  ["Mouse", "Look around"],
-  ["Left click", "Fire or throw"],
-  ["Right click", "Scope or lob"],
-  ["R", "Reload"],
-  ["B", "Buy menu"],
-  ["E", "Plant or defuse"],
-  ["Space", "Jump"],
-  ["Ctrl", "Crouch"],
-  ["Shift", "Walk"],
-  ["1 / 2 / 4 / 5", "Select equipment"],
-  ["Q", "Previous weapon"],
-  ["Tab", "Scoreboard"],
-  ["Esc", "Pause"],
-];
-
+  `${import.meta.env.BASE_URL}art/${map}${thumb ? "-map" : ""}.${map === "dust2" || map === "mirage" ? "webp" : "jpg"}`;
 export function mountMenu(container: HTMLElement, options: MenuOptions) {
   const controller = new AbortController();
   const { signal } = controller;
@@ -177,7 +190,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       </article>
       <div class="csw-poollabel"><span>${icon("map")} Map selection</span><span class="csw-poolcount"></span></div>
       <div class="csw-mapgrid" role="group" aria-label="Map selection">
-      ${(["dust2", "mirage"] as const).map((map, i) => `<button type="button" class="csw-mapcard" data-map="${map}" aria-label="${mapInfo[map].name}"><img src="${art(map, true)}" alt=""><span class="csw-mapcardshade"></span><span class="csw-mapindex">MAP / 0${i + 1}</span><span class="csw-mapcardname">${mapInfo[map].name}</span><span class="csw-mapcheck">${icon("check")}</span></button>`).join("")}</div>
+      ${lobbyMaps.map((map, i) => `<button type="button" class="csw-mapcard" data-map="${map}" aria-label="${mapInfo[map].name}"><img src="${art(map, true)}" alt=""><span class="csw-mapcardshade"></span><span class="csw-mapindex">MAP / 0${i + 1}</span><span class="csw-mapcardname">${mapInfo[map].name}</span><span class="csw-mapcheck">${icon("check")}</span></button>`).join("")}</div>
     </div>
     <form class="csw-setup"><div class="csw-setuphead">${icon("sliders")}<h2>Match setup</h2></div>
       <div class="csw-setupbody">
@@ -242,7 +255,9 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     const img = get<HTMLImageElement>(".csw-featureimg");
     if (img.getAttribute("src") !== art(choice.map)) img.src = art(choice.map);
     get(".csw-poolcount").textContent =
-      choice.map === "dust2" ? "01 / 02" : "02 / 02";
+      String(lobbyMaps.indexOf(choice.map) + 1).padStart(2, "0") +
+      " / " +
+      String(lobbyMaps.length).padStart(2, "0");
   }
   reflect();
   const tab = (active: string) => {
@@ -259,7 +274,9 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     get("dialog h2").textContent =
       kind === "controls" ? "Controls" : "Settings";
     if (kind === "controls") {
-      body.innerHTML = `<dl class="csw-keylist">${matchKeys.map(([key, action]) => `<div><dt>${action}</dt><dd><kbd>${key}</kbd></dd></div>`).join("")}</dl>`;
+      body.innerHTML = "";
+      const cleanup = mountBindEditor(body);
+      dialogListeners.signal.addEventListener("abort", cleanup);
     } else {
       const s = choice.settings;
       const slider = (
@@ -276,7 +293,8 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
         slider("fov", "Field of view", 65, 120, 1) +
         slider("hudScale", "HUD scale", 0.75, 1.5, 0.05) +
         `<label class="csw-settingrow">Crosshair<select data-setting="crosshair"><option value="classic">Classic</option><option value="dot">Dot</option></select></label>
-        <label class="csw-settingrow">Map shadows<input data-setting="shadows" type="checkbox" ${s.shadows ? "checked" : ""}></label>`;
+        <label class="csw-settingrow">Map shadows<input data-setting="shadows" type="checkbox" ${s.shadows ? "checked" : ""}></label>
+        <label class="csw-settingrow">Play in fullscreen (Esc returns to the browser)<input data-setting="fullscreen" type="checkbox" ${s.fullscreen ? "checked" : ""}></label>`;
       get<HTMLSelectElement>("[data-setting=crosshair]").value = s.crosshair;
       const values = () => {
         get("[data-value=sensitivity]").textContent = s.sensitivity.toFixed(2);
@@ -293,7 +311,8 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
           const field = event.target as HTMLInputElement | HTMLSelectElement;
           switch (field.dataset.setting) {
             case "shadows":
-              s.shadows = (field as HTMLInputElement).checked;
+            case "fullscreen":
+              s[field.dataset.setting] = (field as HTMLInputElement).checked;
               break;
             case "crosshair":
               s.crosshair = field.value === "dot" ? "dot" : "classic";
@@ -337,8 +356,8 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       const b = (e.target as Element).closest<HTMLButtonElement>("button");
       if (!b) return;
       const { map, side, difficulty, nav } = b.dataset;
-      if (map === "dust2" || map === "mirage") {
-        choice.map = map;
+      if (map && (lobbyMaps as string[]).includes(map)) {
+        choice.map = map as LobbyMap;
         reflect();
       }
       if (side === "CT" || side === "T") {

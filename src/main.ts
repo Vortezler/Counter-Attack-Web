@@ -1,13 +1,16 @@
 import { createGame } from "./index";
 import { consumeRoomRequest } from "./hub/navigation";
 import { restorePlayerName } from "./hub/supabase";
+import { lobbyMaps, type LobbyMap } from "./menu";
 const q = new URLSearchParams(location.search),
   notice = consumeRoomRequest() ?? undefined;
 const name = await restorePlayerName();
 const game = await createGame(document.getElementById("app")!, {
   playerName: name,
   notice,
-  map: q.get("map") === "mirage" ? "mirage" : "dust2",
+  map: (lobbyMaps as string[]).includes(q.get("map") ?? "")
+    ? (q.get("map") as LobbyMap)
+    : "dust2",
   side: q.get("side") === "T" ? "T" : "CT",
   difficulty:
     q.get("difficulty") === "easy"

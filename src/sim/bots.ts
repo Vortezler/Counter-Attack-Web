@@ -2,6 +2,19 @@ import { type Sim, distance } from "./Sim";
 import { idle, type Player } from "./player";
 import { DEG, DT, clamp, path, nearest } from "./rules";
 import { type Vec3 } from "../world";
+import { scopes, semiAuto, type Nade } from "../config/weapons";
+import { GRAVITY, U } from "./rules";
+/** Aims and throws a grenade so it lands near a ground target. */
+export function lob(s: Sim, p: Player, type: Nade, to: Vec3) {
+  const d = distance(p, to),
+    v = 750 * U,
+    reach = (v * v) / GRAVITY;
+  const angle =
+    d >= reach * 0.98 ? Math.PI / 4 : 0.5 * Math.asin((d * GRAVITY) / (v * v));
+  p.yaw = Math.atan2(to.x - p.x, p.z - to.z);
+  p.pitch = clamp(angle - 10 * DEG, -0.5, 1.2);
+  s.throwGrenade(p, type, 750);
+}
 const normalized = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const settings = {
   easy: [0.45, 4, 0.3, 0.2],
@@ -37,7 +50,13 @@ export function botCommand(s: Sim, p: Player) {
   }
   const target = s.players[p.target],
     objective = s.objective(p);
-  const engagementRange = p.weapon === "awp" ? 60 : p.primary ? 37 : 20;
+  const engagementRange = scopes[p.weapon]
+    ? 60
+    : p.weapon === "nova" || p.weapon === "xm"
+      ? 22
+      : p.primary
+        ? 37
+        : 20;
   const inCombat =
     target?.alive &&
     p.blinded <= s.time &&
@@ -65,24 +84,27 @@ export function botCommand(s: Sim, p: Player) {
       s.time - p.seen > reaction &&
       Math.abs(normalized(cmd.yaw - look)) < 0.22
     ) {
-      cmd.alt = p.weapon === "awp" && !p.scoped && s.time - p.lastFire > 0.5;
-      const semi =
-        p.weapon === "glock" || p.weapon === "deagle" || p.weapon === "awp";
+      cmd.alt =
+        !!scopes[p.weapon] &&
+        p.weapon !== "aug" &&
+        !p.scoped &&
+        dist > 8 &&
+        s.time - p.lastFire > 0.5;
+      const semi = semiAuto.has(p.weapon);
       cmd.fire = semi
         ? !p.lastCmd.fire
         : dist < 12 || (s.tick + p.id * 13) % 39 < 24;
+      const kit = (["molly", "he", "flash"] as const).filter((k) => p[k] > 0);
       if (
         !p.nadeUsed &&
-        (p.he || p.flash) &&
+        kit.length &&
         dist > 7 &&
         dist < 17 &&
         s.rng() < DT * nade
       ) {
-        s.throwGrenade(
-          p,
-          p.he && (!p.flash || s.rng() < 0.65) ? "he" : "flash",
-          540,
-        );
+        const type = kit[Math.floor(s.rng() * kit.length)];
+        if (type === "molly") lob(s, p, "molly", target);
+        else s.throwGrenade(p, type, 540);
         p.nadeUsed = true;
       }
     }
@@ -113,6 +135,30 @@ export function botCommand(s: Sim, p: Player) {
       (s.phase === "live" && p.team === "T"))
   )
     goal = s.bomb;
+  // Attackers smoke off the defenders' rotation before stepping onto the site.
+  if (
+    p.team === "T" &&
+    p.smoke &&
+    !p.smokeUsed &&
+    !p.staging &&
+    s.phase === "live" &&
+    s.time - p.lastFire > 2
+  ) {
+    const d = distance(p, site);
+    if (d < 24 && d > 9) {
+      const ct = s.map.spawns.CT[0];
+      const k = 5 / (distance(site, ct) || 1);
+      lob(s, p, "smoke", {
+        x: site.x + (ct.x - site.x) * k,
+        y: site.y,
+        z: site.z + (ct.z - site.z) * k,
+      });
+      p.smokeUsed = true;
+      cmd.yaw = p.yaw;
+      cmd.pitch = p.pitch;
+      return cmd;
+    }
+  }
   const nodes = s.map.nodes;
   if (!nodes.length) return cmd;
   if (s.time >= p.repath || p.goal < 0) {
@@ -129,13 +175,18 @@ export function botCommand(s: Sim, p: Player) {
   while (p.path.length && distance(p, nodes[p.path[0]]) < 0.66) p.path.shift();
   const next = p.path.length ? nodes[p.path[0]] : goal;
   const d = distance(p, next);
+  const burning = (q: { x: number; z: number }) =>
+    s.fires.some((f) => f.team !== p.team && distance(f, q) < f.r + 0.6);
+  // Wait out enemy fire ahead instead of walking through it.
+  const blocked = burning(next) && !burning(p);
   if (
+    !blocked &&
     d >
-    (p.path.length
-      ? 0.6
-      : p.team === "CT" && s.phase !== "planted"
-        ? 1.5
-        : 0.45)
+      (p.path.length
+        ? 0.6
+        : p.team === "CT" && s.phase !== "planted"
+          ? 1.5
+          : 0.45)
   ) {
     const look = Math.atan2(next.x - p.x, p.z - next.z);
     cmd.yaw = p.yaw + clamp(normalized(look - p.yaw), -0.18, 0.18);

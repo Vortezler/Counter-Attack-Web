@@ -1,19 +1,26 @@
 import { initPhysics } from "../src/sim/Physics";
 import { Sim } from "../src/sim/Sim";
-import { maps } from "../src/world";
+import { maps, mapIds } from "../src/world";
 import assert from "node:assert/strict";
 await initPhysics();
-for (const id of ["dust2", "mirage"] as const) {
+for (const id of mapIds) {
   for (const seed of [713, 3479]) {
     const sim = new Sim(maps[id], "CT", "normal", "Observer", seed, true);
     let kills = 0,
       plants = 0,
       defuses = 0,
-      timeouts = 0;
+      timeouts = 0,
+      smokes = 0,
+      fires = 0,
+      shotgunKills = 0;
     const rounds: string[] = [];
     const begin = performance.now();
     sim.onEvent((e) => {
       if (e.type === "kill") kills++;
+      if (e.type === "kill" && (e.weapon === "nova" || e.weapon === "xm"))
+        shotgunKills++;
+      if (e.type === "smoke") smokes++;
+      if (e.type === "fire") fires++;
       if (e.type === "plant") plants++;
       if (e.type === "roundEnd") {
         rounds.push(e.message!);
@@ -38,6 +45,9 @@ for (const id of ["dust2", "mirage"] as const) {
           plants,
           defuses,
           timeouts,
+          smokes,
+          fires,
+          shotgunKills,
           meanTickMs: +((performance.now() - begin) / sim.tick).toFixed(3),
         }),
       );

@@ -26,6 +26,8 @@ export interface RenderFrame {
   debug?: boolean;
   bomb?: Vec3 | null;
   grenades?: (Vec3 & { type?: string; id?: number })[];
+  smokes?: (Vec3 & { id: number; r: number; born: number; until: number })[];
+  fires?: (Vec3 & { id: number; r: number; born: number; until: number })[];
   hitboxLines?: Float32Array;
   reducedMotion?: boolean;
   spectating?: boolean;
@@ -88,8 +90,163 @@ function barrel(
   m.rotation.x = Math.PI / 2;
   return m;
 }
+function special(id: string, g: THREE.Group) {
+  if (id === "smoke") {
+    piece(
+      g,
+      new THREE.CylinderGeometry(0.047, 0.047, 0.16, 12),
+      "#5d665c",
+      0,
+      0,
+      0,
+    );
+    for (const y of [-0.03, 0.03])
+      for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        part(
+          g,
+          0.012,
+          0.012,
+          0.004,
+          dark,
+          Math.sin(a) * 0.047,
+          y,
+          Math.cos(a) * 0.047,
+        ).rotation.y = a;
+      }
+    part(g, 0.05, 0.03, 0.05, matte, 0, 0.094, 0);
+    part(g, 0.016, 0.11, 0.022, gunmetal, 0.042, 0.04, 0);
+    piece(
+      g,
+      new THREE.TorusGeometry(0.028, 0.005, 5, 12),
+      "#bec0aa",
+      -0.03,
+      0.105,
+      0.01,
+    );
+    return true;
+  }
+  if (id === "molly") {
+    piece(
+      g,
+      new THREE.CylinderGeometry(0.043, 0.047, 0.15, 12),
+      "#6f4a22",
+      0,
+      -0.01,
+      0,
+    );
+    piece(
+      g,
+      new THREE.CylinderGeometry(0.016, 0.03, 0.05, 10),
+      "#6f4a22",
+      0,
+      0.088,
+      0,
+    );
+    piece(
+      g,
+      new THREE.CylinderGeometry(0.015, 0.015, 0.05, 8),
+      "#7b5a2c",
+      0,
+      0.13,
+      0,
+    );
+    const rag = part(g, 0.018, 0.045, 0.016, "#9c8664", 0.004, 0.165, 0);
+    rag.rotation.z = 0.5;
+    part(g, 0.05, 0.03, 0.002, "#d8c9a1", 0, -0.01, -0.047);
+    return true;
+  }
+  if (id === "aug") {
+    const body = "#55634a";
+    part(g, 0.078, 0.1, 0.42, body, 0, 0.02, 0.06);
+    part(g, 0.06, 0.05, 0.18, dark, 0, 0.03, -0.22);
+    barrel(g, 0.015, 0.22, gunmetal, 0, 0.04, -0.4);
+    barrel(g, 0.022, 0.05, matte, 0, 0.04, -0.52);
+    barrel(g, 0.03, 0.2, dark, 0, 0.125, -0.04);
+    barrel(g, 0.038, 0.04, gunmetal, 0, 0.125, -0.15);
+    part(g, 0.03, 0.04, 0.05, gunmetal, 0, 0.09, -0.04);
+    const fore = part(g, 0.04, 0.12, 0.05, body, 0, -0.07, -0.17);
+    fore.rotation.x = 0.2;
+    const handle = part(g, 0.05, 0.12, 0.06, grip, 0, -0.07, -0.03);
+    handle.rotation.x = -0.2;
+    const mag = part(g, 0.05, 0.14, 0.075, "#6c6e60", 0, -0.08, 0.13);
+    mag.rotation.x = 0.15;
+    part(g, 0.082, 0.11, 0.04, matte, 0, 0.012, 0.27);
+    return true;
+  }
+  if (id === "p90") {
+    const body = "#2d322f";
+    part(g, 0.08, 0.1, 0.46, body, 0, 0.0, 0.02);
+    part(g, 0.06, 0.04, 0.34, "#7d7861", 0, 0.07, -0.02);
+    part(g, 0.062, 0.006, 0.34, "#a59e7c", 0, 0.092, -0.02);
+    part(g, 0.04, 0.05, 0.08, dark, 0, 0.11, -0.12);
+    barrel(g, 0.016, 0.12, gunmetal, 0, 0.02, -0.26);
+    part(g, 0.084, 0.04, 0.12, matte, 0, -0.06, -0.08);
+    part(g, 0.084, 0.08, 0.05, body, 0, -0.085, 0.03);
+    part(g, 0.084, 0.12, 0.05, body, 0, -0.04, 0.22);
+    return true;
+  }
+  if (id === "ssg") {
+    const body = "#3d4a52";
+    part(g, 0.064, 0.07, 0.36, body, 0, 0.02, 0.02);
+    const stock = part(g, 0.06, 0.1, 0.22, body, 0, -0.005, 0.25);
+    stock.rotation.x = 0.06;
+    part(g, 0.05, 0.06, 0.24, dark, 0, 0.025, -0.25);
+    barrel(g, 0.011, 0.46, gunmetal, 0, 0.035, -0.58);
+    barrel(g, 0.017, 0.05, matte, 0, 0.035, -0.82);
+    barrel(g, 0.028, 0.22, dark, 0, 0.12, -0.04);
+    barrel(g, 0.036, 0.05, gunmetal, 0, 0.12, 0.08);
+    barrel(g, 0.04, 0.07, matte, 0, 0.12, -0.16);
+    part(g, 0.028, 0.05, 0.03, gunmetal, 0, 0.078, -0.04);
+    const bolt = part(g, 0.06, 0.012, 0.012, gunmetal, 0.04, 0.05, 0.06);
+    bolt.rotation.y = 0.3;
+    const handle = part(g, 0.05, 0.12, 0.06, grip, 0, -0.06, 0.08);
+    handle.rotation.x = -0.25;
+    part(g, 0.04, 0.09, 0.05, matte, 0, -0.06, -0.06);
+    return true;
+  }
+  if (id === "nova" || id === "xm") {
+    const xm = id === "xm",
+      body = xm ? "#2a2d2c" : "#3a3c38";
+    part(g, 0.07, 0.085, 0.25, body, 0, 0.03, 0.0);
+    barrel(g, 0.018, 0.56, gunmetal, 0, 0.055, -0.4);
+    barrel(g, 0.02, 0.44, dark, 0, 0.012, -0.33);
+    const pump = part(
+      g,
+      0.062,
+      0.058,
+      0.17,
+      xm ? matte : "#6b4a30",
+      0,
+      0.012,
+      -0.3,
+    );
+    if (!xm)
+      for (let i = 0; i < 6; i++)
+        part(pump, 0.064, 0.06, 0.006, "#4f3622", 0, 0, -0.07 + i * 0.028);
+    const stock = part(
+      g,
+      0.062,
+      xm ? 0.08 : 0.1,
+      0.24,
+      xm ? body : "#6b4a30",
+      0,
+      xm ? 0.02 : -0.01,
+      0.23,
+    );
+    stock.rotation.x = xm ? 0 : 0.12;
+    const handle = part(g, 0.05, 0.13, 0.06, grip, 0, -0.07, 0.07);
+    handle.rotation.x = -0.25;
+    part(g, 0.044, 0.012, 0.08, matte, 0, -0.05, -0.02);
+    part(g, 0.012, 0.02, 0.012, "#c9c2a0", 0, 0.08, -0.66);
+    if (xm) part(g, 0.05, 0.012, 0.16, gunmetal, 0, 0.08, 0.0);
+    return true;
+  }
+  return false;
+}
 function gun(id: string) {
   const g = new THREE.Group();
+  if (special(id, g)) return g;
   if (id === "he" || id === "flash") {
     const flash = id === "flash";
     piece(
@@ -262,6 +419,20 @@ function gun(id: string) {
       sniper ? -0.49 : -0.39,
     );
     if (id === "m4") barrel(g, 0.025, 0.21, matte, 0, 0.037, -0.54);
+    if (id === "m4a4") {
+      barrel(g, 0.019, 0.06, dark, 0, 0.037, -0.51);
+      for (let i = 0; i < 4; i++)
+        part(
+          g,
+          0.006,
+          0.03,
+          0.05,
+          matte,
+          Math.sin(i * 1.57) * 0.017,
+          0.037 + Math.cos(i * 1.57) * 0.017,
+          -0.51,
+        );
+    }
     if (sniper) {
       barrel(g, 0.034, 0.19, dark, 0, 0.148, -0.051);
       barrel(g, 0.045, 0.055, gunmetal, 0, 0.148, 0.046);
@@ -318,7 +489,15 @@ function heldWeapon(id: string) {
     sleeve.rotation.z = left ? -0.3 : 0.36;
   };
   hand(0.038, -0.083, 0.033, false);
-  const small = ["he", "flash", "bomb", "glock", "deagle"].includes(id);
+  const small = [
+    "he",
+    "flash",
+    "smoke",
+    "molly",
+    "bomb",
+    "glock",
+    "deagle",
+  ].includes(id);
   hand(
     small ? -0.043 : -0.038,
     small ? -0.104 : -0.038,
@@ -329,13 +508,22 @@ function heldWeapon(id: string) {
 }
 function humanoid(team: Team) {
   const root = new THREE.Group(),
+    fall = new THREE.Group(),
+    body = new THREE.Group(),
+    torso = new THREE.Group(),
+    head = new THREE.Group(),
+    weapon = new THREE.Group(),
     ct = team === "CT",
     uniform = ct ? "#586b74" : "#a88059",
     vest = ct ? "#384a50" : "#665944",
-    legs: THREE.Group[] = [];
+    legs: THREE.Group[] = [],
+    arms: THREE.Group[] = [];
+  root.add(fall);
+  fall.add(body);
+  body.add(torso, head, weapon);
   for (const x of [-0.135, 0.135]) {
     const leg = new THREE.Group();
-    root.add(leg);
+    body.add(leg);
     leg.position.set(x, 0.79, 0);
     legs.push(leg);
     part(leg, 0.19, 0.38, 0.2, uniform, 0, -0.18, 0);
@@ -343,61 +531,66 @@ function humanoid(team: Team) {
     part(leg, 0.18, 0.15, 0.26, "#3c3930", 0, -0.704, -0.025);
     part(leg, 0.16, 0.16, 0.07, vest, 0, -0.385, -0.095);
   }
-  part(root, 0.41, 0.53, 0.23, uniform, 0, 1.05, 0);
-  part(root, 0.46, 0.35, 0.28, vest, 0, 1.18, 0);
+  part(torso, 0.41, 0.53, 0.23, uniform, 0, 1.05, 0);
+  part(torso, 0.46, 0.35, 0.28, vest, 0, 1.18, 0);
   for (const x of [-0.13, 0, 0.13])
-    part(root, 0.107, 0.155, 0.07, ct ? "#62716b" : "#83775b", x, 1.1, -0.142);
-  const head = piece(
-    root,
+    part(torso, 0.107, 0.155, 0.07, ct ? "#62716b" : "#83775b", x, 1.1, -0.142);
+  head.position.set(0, 1.4, 0);
+  const skull = piece(
+    head,
     new THREE.SphereGeometry(0.159, 10, 7),
     ct ? "#907f67" : "#a88665",
     0,
-    1.57,
+    0.17,
     0,
   );
-  head.scale.z = 0.88;
+  skull.scale.z = 0.88;
   if (ct) {
     const helm = piece(
-      root,
+      head,
       new THREE.SphereGeometry(0.181, 12, 7, 0, Math.PI * 2, 0, Math.PI * 0.63),
       "#4a5d62",
       0,
-      1.62,
+      0.22,
       0,
     );
     helm.scale.y = 0.82;
-    part(root, 0.243, 0.066, 0.039, "#393e39", 0, 1.59, -0.127);
+    part(head, 0.243, 0.066, 0.039, "#393e39", 0, 0.19, -0.127);
   } else {
-    part(root, 0.274, 0.084, 0.06, "#6d6553", 0, 1.52, -0.11);
-    part(root, 0.285, 0.081, 0.22, "#967654", 0, 1.688, 0);
+    part(head, 0.274, 0.084, 0.06, "#6d6553", 0, 0.12, -0.11);
+    part(head, 0.285, 0.081, 0.22, "#967654", 0, 0.288, 0);
   }
   for (const side of [-1, 1]) {
-    const arm = part(
-      root,
+    const arm = new THREE.Group();
+    arm.position.set(side * 0.25, 1.33, -0.02);
+    body.add(arm);
+    arms.push(arm);
+    const upper = part(
+      arm,
       0.14,
       0.33,
       0.15,
       uniform,
-      side * 0.265,
-      1.18,
-      -0.04,
+      side * 0.015,
+      -0.15,
+      -0.02,
     );
-    arm.rotation.x = -0.35;
+    upper.rotation.x = -0.35;
     const forearm = part(
-      root,
+      arm,
       0.12,
       0.12,
       0.28,
       uniform,
-      side * 0.225,
-      1.04,
-      -0.17,
+      side * -0.025,
+      -0.29,
+      -0.15,
     );
     forearm.rotation.y = side * 0.3;
   }
-  part(root, 0.087, 0.095, 0.47, dark, 0.13, 1.105, -0.26);
-  barrel(root, 0.02, 0.25, matte, 0.13, 1.12, -0.6);
-  // One draw per rigid body group preserves the leg animation while keeping the bot budget low.
+  part(weapon, 0.087, 0.095, 0.47, dark, 0.13, 1.105, -0.26);
+  barrel(weapon, 0.02, 0.25, matte, 0.13, 1.12, -0.6);
+  // One draw per rigid body group keeps limb animation while holding the bot budget low.
   function flatten(group: THREE.Group) {
     const gs: THREE.BufferGeometry[] = [];
     for (const obj of [...group.children]) {
@@ -433,9 +626,85 @@ function humanoid(team: Team) {
       group.add(m);
     }
   }
-  legs.forEach(flatten);
-  flatten(root);
-  return { root, legs, team };
+  [...legs, ...arms, torso, head, weapon].forEach(flatten);
+  return { root, fall, body, head, weapon, legs, arms, team };
+}
+type Humanoid = ReturnType<typeof humanoid>;
+interface Ragdoll {
+  t0: number;
+  dir: { x: number; z: number };
+  head: boolean;
+  side: number;
+}
+const upAxis = new THREE.Vector3(),
+  tilt = new THREE.Quaternion();
+function pose(
+  m: Humanoid,
+  rag: Ragdoll | undefined,
+  t: number,
+  moving: boolean,
+  id: number,
+) {
+  if (!rag) {
+    m.fall.quaternion.identity();
+    m.fall.position.set(0, 0, 0);
+    m.weapon.visible = true;
+    m.head.rotation.set(0, 0, 0);
+    m.arms.forEach((a) => a.rotation.set(0, 0, 0));
+    m.legs.forEach((leg, i) => {
+      leg.rotation.set(
+        moving ? Math.sin(t * 10 + id + i * Math.PI) * 0.44 : 0,
+        0,
+        0,
+      );
+    });
+    return;
+  }
+  // Closed-form topple: gravity accelerates the fall about the feet, then the body bounces and settles.
+  const age = Math.max(0, t - rag.t0),
+    w0 = rag.head ? 2.6 : 1.4,
+    alpha = 15,
+    land = (-w0 + Math.sqrt(w0 * w0 + alpha * Math.PI)) / alpha;
+  const theta =
+    age < land
+      ? w0 * age + 0.5 * alpha * age * age
+      : Math.PI / 2 -
+        0.16 *
+          Math.abs(Math.sin((age - land) * 13)) *
+          Math.exp(-(age - land) * 6);
+  const ease = Math.min(1, age / 0.5),
+    wobble = Math.sin(age * 15) * Math.exp(-age * 3.5);
+  upAxis.set(rag.dir.z, 0, -rag.dir.x).normalize();
+  tilt.setFromAxisAngle(upAxis, Math.min(Math.PI / 2, theta));
+  m.fall.quaternion.copy(tilt);
+  const slide = (rag.head ? 0.75 : 0.45) * (1 - Math.exp(-age * 5));
+  m.fall.position.set(
+    rag.dir.x * slide,
+    0.13 * Math.sin(Math.min(Math.PI / 2, theta)),
+    rag.dir.z * slide,
+  );
+  m.weapon.visible = false;
+  m.head.rotation.set(
+    0.55 * ease + wobble * 0.35,
+    rag.side * 0.4 * ease,
+    rag.side * 0.25 * ease,
+  );
+  m.arms.forEach((a, i) => {
+    const s = i ? 1 : -1;
+    a.rotation.set(
+      -0.4 - 1.3 * ease + wobble * 0.6 * s,
+      0,
+      s * (0.25 + 1.05 * ease) + wobble * 0.5,
+    );
+  });
+  m.legs.forEach((leg, i) => {
+    const s = i ? 1 : -1;
+    leg.rotation.set(
+      (0.35 + 0.25 * rag.side * s) * ease + wobble * 0.3,
+      0,
+      s * 0.22 * ease,
+    );
+  });
 }
 function seeded(initial: number) {
   let n = initial;
@@ -516,17 +785,47 @@ function texture(kind: string) {
   t.anisotropy = 4;
   return t;
 }
-function sky(dust: boolean) {
+function sky(theme: Theme) {
   const { canvas, ctx } = makeCanvas(16, 512);
   const g = ctx.createLinearGradient(0, 0, 0, 512);
-  g.addColorStop(0, dust ? "#44738a" : "#547e9c");
-  g.addColorStop(0.37, dust ? "#98b9bd" : "#a3c4cf");
-  g.addColorStop(0.53, dust ? "#efcf9d" : "#ddceb4");
-  g.addColorStop(1, "#8a775c");
+  g.addColorStop(0, theme.sky[0]);
+  g.addColorStop(0.37, theme.sky[1]);
+  g.addColorStop(0.53, theme.sky[2]);
+  g.addColorStop(1, theme.sky[3]);
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, 16, 512);
   const t = new THREE.CanvasTexture(canvas);
   t.mapping = THREE.EquirectangularReflectionMapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function softTexture(kind: "smoke" | "flame") {
+  const { canvas, ctx } = makeCanvas(128, 128),
+    rng = seeded(kind === "smoke" ? 91 : 37);
+  const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 62);
+  if (kind === "smoke") {
+    g.addColorStop(0, "rgba(255,255,255,1)");
+    g.addColorStop(0.6, "rgba(255,255,255,0.92)");
+    g.addColorStop(0.85, "rgba(255,255,255,0.45)");
+    g.addColorStop(1, "rgba(255,255,255,0)");
+  } else {
+    g.addColorStop(0, "rgba(255,246,200,1)");
+    g.addColorStop(0.3, "rgba(255,170,60,0.85)");
+    g.addColorStop(0.7, "rgba(200,60,20,0.35)");
+    g.addColorStop(1, "rgba(120,20,0,0)");
+  }
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 128, 128);
+  if (kind === "smoke") {
+    ctx.globalCompositeOperation = "destination-out";
+    for (let i = 0; i < 40; i++) {
+      ctx.fillStyle = `rgba(0,0,0,${0.05 + rng() * 0.08})`;
+      ctx.beginPath();
+      ctx.arc(rng() * 128, rng() * 128, 6 + rng() * 14, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const t = new THREE.CanvasTexture(canvas);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -549,10 +848,133 @@ function stamp(text: string, fg: string, bg?: string) {
   return t;
 }
 type Batch = { geo: THREE.BufferGeometry[]; mat: THREE.Material };
+interface Theme {
+  seed: number;
+  walls: string[];
+  floor: string;
+  cap: string;
+  lip: string;
+  facade: "market" | "industrial" | "construction";
+  doors: string[];
+  tiles: string[];
+  trimTile: string;
+  signs: string[];
+  awning: [string, string];
+  sky: [string, string, string, string];
+  fog: number;
+  fogDensity: number;
+  skyline: "domes" | "towers" | "cooling" | "below";
+  skylineColor: string;
+  accent: string;
+  trees: "palm" | "cypress" | "none";
+}
+const themes: Record<string, Theme> = {
+  dust2: {
+    seed: 418,
+    walls: ["#e9c89d", "#e1bf93", "#e4ceb0", "#d7b48a", "#d1b18d", "#ddc9a8"],
+    floor: "#d3bd96",
+    cap: "#b6a17d",
+    lip: "#dfc4a0",
+    facade: "market",
+    doors: ["#5a716a", "#765b3f", "#476666", "#726852"],
+    tiles: ["#b4a084"],
+    trimTile: "#c9b593",
+    signs: ["ATELIER", "ÉPICERIE", "MARCHÉ"],
+    awning: ["#8c7753", "#756442"],
+    sky: ["#44738a", "#98b9bd", "#efcf9d", "#8a775c"],
+    fog: 0xe1c49d,
+    fogDensity: 0.0065,
+    skyline: "domes",
+    skylineColor: "#c6b392",
+    accent: "#81958c",
+    trees: "palm",
+  },
+  mirage: {
+    seed: 673,
+    walls: ["#d8b5a1", "#e0c7ad", "#a6bac0", "#dbc0a9", "#b3bfb9", "#d7ae96"],
+    floor: "#c9baa4",
+    cap: "#b8a391",
+    lip: "#d3c4b0",
+    facade: "market",
+    doors: ["#496d78", "#526e75", "#56765f", "#6a4e45"],
+    tiles: ["#84a3aa", "#b48d79"],
+    trimTile: "#b7b6a1",
+    signs: ["CAFÉ", "BAZAR", "MARCHÉ"],
+    awning: ["#ad7961", "#96654e"],
+    sky: ["#547e9c", "#a3c4cf", "#ddceb4", "#8a775c"],
+    fog: 0xcac0ad,
+    fogDensity: 0.0065,
+    skyline: "domes",
+    skylineColor: "#baa99b",
+    accent: "#869b9e",
+    trees: "palm",
+  },
+  inferno: {
+    seed: 911,
+    walls: ["#dcae84", "#e4bd94", "#cf9a70", "#e8cba6", "#d6a47c", "#d2b291"],
+    floor: "#b8a289",
+    cap: "#9a6a4b",
+    lip: "#c4805a",
+    facade: "market",
+    doors: ["#5f6d4a", "#7a4b32", "#4f6157", "#8a6a3c"],
+    tiles: ["#a9714f", "#7f8f6a"],
+    trimTile: "#c8a27e",
+    signs: ["TRATTORIA", "PANETTERIA", "FARMACIA"],
+    awning: ["#8f4a33", "#6f3a28"],
+    sky: ["#3f6f9a", "#9cc0d8", "#f3d7a8", "#8b7258"],
+    fog: 0xe6cfb0,
+    fogDensity: 0.006,
+    skyline: "towers",
+    skylineColor: "#d4a882",
+    accent: "#a35a3c",
+    trees: "cypress",
+  },
+  nuke: {
+    seed: 301,
+    walls: ["#d9dcd8", "#c7ccc9", "#b9c3c6", "#d2d0c6", "#aeb9b5", "#e0e0da"],
+    floor: "#9f9d95",
+    cap: "#8f969a",
+    lip: "#b4bab9",
+    facade: "industrial",
+    doors: ["#3f6b8f", "#566a73", "#8b8f5a", "#6d7478"],
+    tiles: ["#4f7fa3", "#b0533e"],
+    trimTile: "#8a8f8e",
+    signs: ["REACTOR", "AUTHORIZED", "SECTOR 7"],
+    awning: ["#5d6a70", "#4c585e"],
+    sky: ["#5d86a8", "#a9c3d3", "#d9dfdc", "#8b8f88"],
+    fog: 0xc8d0d2,
+    fogDensity: 0.0055,
+    skyline: "cooling",
+    skylineColor: "#bfc4c2",
+    accent: "#9aa3a6",
+    trees: "none",
+  },
+  vertigo: {
+    seed: 517,
+    walls: ["#c9c8c2", "#b8b7b0", "#d4d2ca", "#a9aaa6", "#c2c5c4", "#dad7cd"],
+    floor: "#aaa8a0",
+    cap: "#8e8f8b",
+    lip: "#b9b8b1",
+    facade: "construction",
+    doors: ["#2f6fa3", "#d27a2c", "#7c8a91", "#4d5a60"],
+    tiles: ["#2f6fa3", "#d27a2c"],
+    trimTile: "#9a9a94",
+    signs: ["LEVEL 52", "HARD HAT", "NO ENTRY"],
+    awning: ["#2f6fa3", "#255a85"],
+    sky: ["#2f6db3", "#8fbde3", "#e3eef6", "#b4c8d8"],
+    fog: 0xcfe0ec,
+    fogDensity: 0.0038,
+    skyline: "below",
+    skylineColor: "#8ea2b2",
+    accent: "#e0a030",
+    trees: "none",
+  },
+};
+const themeOf = (id: string) => themes[id] ?? themes.dust2;
 const axes = new THREE.Vector3(0, 1, 0);
 function worldMeshes(map: MapDef, scene: THREE.Scene) {
-  const dust = map.id === "dust2",
-    rng = seeded(dust ? 418 : 673),
+  const theme = themeOf(map.id),
+    rng = seeded(theme.seed),
     batch = new Map<string, Batch>();
   const basic = new THREE.MeshStandardMaterial({
     vertexColors: true,
@@ -703,22 +1125,87 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
       col: string,
       k = "plain",
     ) => cub(X(u, v), y, Z(u, v), w, h, d, col, k, angle);
-    const palette = dust
-      ? ["#5a716a", "#765b3f", "#476666", "#726852"]
-      : ["#496d78", "#526e75", "#56765f", "#6a4e45"];
+    const palette = theme.doors;
     let signed = false;
+    if (theme.facade !== "market") {
+      for (let u = -(span - 5) / 2; u < span / 2; u += 5) {
+        if (!visible(u)) continue;
+        const clr = palette[Math.floor(rng() * palette.length)];
+        if (theme.facade === "industrial") {
+          rect(u, 0.6, 0.02, 4.98, 1.2, 0.04, theme.tiles[0], "metal");
+          rect(u, 1.24, 0.03, 4.98, 0.08, 0.05, theme.tiles[1]);
+          if (rng() < 0.45) {
+            rect(u, 1.25, 0.06, 1.7, 2.5, 0.08, "#545b5d", "metal");
+            for (let k = 0; k < 6; k++)
+              rect(u, 0.3 + k * 0.4, 0.11, 1.62, 0.05, 0.03, "#6d7476");
+            rect(u, 2.62, 0.14, 1.9, 0.14, 0.2, "#d2b13a");
+          } else if (rng() < 0.5) {
+            rect(u - 1.2, 2.2, 0.08, 1.0, 0.7, 0.14, "#7c8486", "metal");
+            for (let k = 0; k < 4; k++)
+              rect(u - 1.2, 1.95 + k * 0.17, 0.16, 0.9, 0.04, 0.04, "#40474a");
+          }
+          rect(u, 3.25, 0.16, 5, 0.12, 0.12, "#80878a", "metal");
+          if (rng() < 0.35)
+            rect(u + 1.4, 3.55, 0.06, 1.6, 0.45, 0.06, "#2f3a3f");
+          if (!signed && rng() < 0.2) {
+            label(
+              theme.signs[Math.floor(rng() * theme.signs.length)],
+              X(u, 0.1),
+              2.4,
+              Z(u, 0.1),
+              2.3,
+              0.6,
+              angle,
+              false,
+              "#f2f0e6",
+              clr,
+            );
+            signed = true;
+          }
+        } else {
+          for (const y of [1.6, 3.4])
+            if (y < b.h - 0.3)
+              rect(u, y, 0.03, 5, 0.18, 0.08, "#9d9c95", "concrete");
+          if (rng() < 0.4) rect(u, 2.4, 0.06, 3.4, 1.4, 0.03, "#2e3a42");
+          else if (rng() < 0.4) {
+            rect(u, 1.4, 0.08, 4.4, 2.4, 0.03, clr);
+            for (let k = 0; k < 5; k++)
+              rect(u - 2 + k, 1.4, 0.1, 0.05, 2.4, 0.02, "#d9d9d0");
+          }
+          if (rng() < 0.3)
+            rect(u + 1.6, 0.55, 0.1, 1.2, 1.1, 0.03, theme.tiles[1]);
+          if (!signed && rng() < 0.18) {
+            label(
+              theme.signs[Math.floor(rng() * theme.signs.length)],
+              X(u, 0.1),
+              2.2,
+              Z(u, 0.1),
+              2.2,
+              0.6,
+              angle,
+              false,
+              "#1d2a33",
+              "#e8b23a",
+            );
+            signed = true;
+          }
+        }
+      }
+      return;
+    }
     for (let u = -(span - 5) / 2; u < span / 2; u += 5) {
       if (!visible(u)) continue;
       const clr = palette[Math.floor(rng() * palette.length)];
       const arch = rng() < 0.4;
       if (rng() < 0.38) {
-        const tileColor = dust
-          ? "#b4a084"
-          : rng() < 0.6
-            ? "#84a3aa"
-            : "#b48d79";
+        const tileColor =
+          theme.tiles.length === 1
+            ? theme.tiles[0]
+            : rng() < 0.6
+              ? theme.tiles[0]
+              : theme.tiles[1];
         rect(u, 0.39, 0.012, 4.96, 0.78, 0.033, tileColor, "plaster");
-        rect(u, 0.81, 0.029, 4.97, 0.06, 0.045, dust ? "#c9b593" : "#b7b6a1");
+        rect(u, 0.81, 0.029, 4.97, 0.06, 0.045, theme.trimTile);
       }
       rect(u, 1.16, 0.025, 1.44, 2.32, 0.075, "#6f604b");
       rect(u, 1.1, 0.08, 1.16, 2.18, 0.07, clr, "wood");
@@ -743,9 +1230,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
         }
       }
       if (!signed && rng() < 0.18) {
-        const signs = dust
-          ? ["ATELIER", "ÉPICERIE", "MARCHÉ"]
-          : ["CAFÉ", "BAZAR", "MARCHÉ"];
+        const signs = theme.signs;
         label(
           signs[Math.floor(rng() * 3)],
           X(u, 0.17),
@@ -767,67 +1252,157 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
           X(u, 0.52),
           2.7,
           Z(u, 0.52),
-          dust ? "#8c7753" : "#ad7961",
+          theme.awning[0],
           "plain",
           angle,
         );
-        rect(u, 2.57, 0.97, 2.16, 0.18, 0.08, dust ? "#756442" : "#96654e");
+        rect(u, 2.57, 0.97, 2.16, 0.18, 0.08, theme.awning[1]);
       } else if (rng() < 0.16)
         rect(u + 1.58, 2.1, 0.12, 0.65, 0.89, 0.24, "#9b9f94", "metal");
     }
   }
-  const dustWalls = [
-    "#e9c89d",
-    "#e1bf93",
-    "#e4ceb0",
-    "#d7b48a",
-    "#d1b18d",
-    "#ddc9a8",
-  ];
-  const mirageWalls = [
-    "#d8b5a1",
-    "#e0c7ad",
-    "#a6bac0",
-    "#dbc0a9",
-    "#b3bfb9",
-    "#d7ae96",
-  ];
   for (const b of map.boxes) {
     const { x, y, z, w, h, d, mat, style } = b;
-    const palette = dust ? dustWalls : mirageWalls;
+    const palette = theme.walls;
     const tint =
       style === "building"
         ? palette[Math.floor(rng() * palette.length)]
         : style === "floor"
-          ? dust
-            ? "#d3bd96"
-            : "#c9baa4"
-          : mat === "wood"
-            ? "#9e794b"
-            : mat === "metal"
-              ? "#607878"
-              : mat === "concrete"
-                ? "#adab9a"
-                : mat === "glass"
-                  ? "#87a7a3"
-                  : "#d4be9c";
-    cub(x, y, z, w, h, d, tint, mat);
-    if (style === "building") {
+          ? theme.floor
+          : style === "barrier" && theme.facade === "construction"
+            ? "#d97a2b"
+            : mat === "wood"
+              ? "#9e794b"
+              : mat === "metal"
+                ? "#607878"
+                : mat === "concrete"
+                  ? "#adab9a"
+                  : mat === "glass"
+                    ? "#87a7a3"
+                    : "#d4be9c";
+    if (style === "tank") {
+      add(
+        new THREE.CylinderGeometry(w * 0.52, w * 0.52, h, 20),
+        x,
+        y,
+        z,
+        "#c3c8c4",
+        "metal",
+      );
+      for (const k of [-0.35, 0, 0.35])
+        add(
+          new THREE.CylinderGeometry(w * 0.535, w * 0.535, 0.18, 20),
+          x,
+          y + k * h,
+          z,
+          "#8e9697",
+        );
+      add(
+        new THREE.SphereGeometry(
+          w * 0.52,
+          20,
+          6,
+          0,
+          Math.PI * 2,
+          0,
+          Math.PI / 2,
+        ),
+        x,
+        y + h / 2,
+        z,
+        "#aab1b0",
+        "metal",
+      );
+      for (let k = 0; k < 10; k++)
+        cub(
+          x + w * 0.54,
+          y - h / 2 + 0.5 + k * (h / 10),
+          z,
+          0.05,
+          0.05,
+          0.5,
+          "#4c5355",
+        );
+      continue;
+    }
+    if (style === "fountain") {
+      cub(x, y, z, w, h, d, "#b9a58a", "stone");
+      cub(x, y + h / 2 - 0.05, z, w - 0.25, 0.04, d - 0.25, "#4f7d84");
+      cyl(x, y + h / 2 + 0.35, z, 0.12, 0.16, 0.8, "#c8b494");
+      cyl(x, y + h / 2 + 0.8, z, 0.35, 0.2, 0.12, "#c8b494");
+      continue;
+    }
+    if (style === "scaffold") {
+      cub(x, y, z, w - 0.08, h, d - 0.08, "#3d6f9c");
+      for (const sx of [-1, 1])
+        for (const sz of [-1, 1])
+          cub(
+            x + (sx * w) / 2,
+            y,
+            z + (sz * d) / 2,
+            0.06,
+            h + 0.3,
+            0.06,
+            "#c2c4bf",
+            "metal",
+          );
+      for (let k = 0; k <= 3; k++) {
+        const yy = y - h / 2 + (k * h) / 3;
+        cub(x, yy, z + d / 2, w, 0.05, 0.05, "#c2c4bf");
+        cub(x, yy, z - d / 2, w, 0.05, 0.05, "#c2c4bf");
+        cub(x + w / 2, yy, z, 0.05, 0.05, d, "#c2c4bf");
+        cub(x - w / 2, yy, z, 0.05, 0.05, d, "#c2c4bf");
+      }
+      cub(x, y + h / 2 + 0.04, z, w + 0.2, 0.06, d + 0.2, "#9b7a4d", "wood");
+      continue;
+    }
+    if (style === "barrier") {
+      cub(x, y - h * 0.3, z, w, h * 0.4, d, tint, mat);
       cub(
         x,
-        h - 0.15,
+        y + h * 0.2,
         z,
-        w + 0.12,
-        0.24,
-        d + 0.12,
-        dust ? "#b6a17d" : "#b8a391",
-        "stone",
+        w * (w > d ? 1 : 0.55),
+        h * 0.6,
+        d * (d > w ? 1 : 0.55),
+        tint,
+        mat,
       );
-      const lip = dust ? "#dfc4a0" : "#d3c4b0";
+      if (theme.facade === "construction")
+        for (let k = -1; k <= 1; k += 2)
+          cub(x, y + k * 0.15, z, w + 0.01, 0.08, d + 0.01, "#f2efe6");
+      continue;
+    }
+    cub(x, y, z, w, h, d, tint, mat);
+    if (style === "building") {
+      cub(x, h - 0.15, z, w + 0.12, 0.24, d + 0.12, theme.cap, "stone");
+      const lip = theme.lip;
       cub(x, h + 0.16, z + d / 2 - 0.1, w, 0.32, 0.2, lip);
       cub(x, h + 0.16, z - d / 2 + 0.1, w, 0.32, 0.2, lip);
       cub(x - w / 2 + 0.1, h + 0.16, z, 0.2, 0.32, d, lip);
       cub(x + w / 2 - 0.1, h + 0.16, z, 0.2, 0.32, d, lip);
+      if (theme.facade === "construction") {
+        for (let k = 0; k < 7; k++)
+          cyl(
+            x - w / 2 + 0.4 + rng() * (w - 0.8),
+            h + 0.6,
+            z - d / 2 + 0.4 + rng() * (d - 0.8),
+            0.018,
+            0.018,
+            1.2,
+            "#7a4a32",
+            4,
+          );
+      } else if (theme.skyline === "towers" && rng() < 0.5) {
+        const cap = new THREE.ConeGeometry(Math.hypot(w, d) * 0.5, 1.6, 4);
+        cap.rotateY(Math.PI / 4);
+        cap.scale(
+          (w / Math.hypot(w, d)) * 1.41,
+          1,
+          (d / Math.hypot(w, d)) * 1.41,
+        );
+        add(cap, x, h + 1.1, z, "#b8613f");
+      }
       if (rng() < 0.36) {
         cub(x, h + 0.5, z, 1.42, 0.95, 0.9, "#a3a298", "metal");
         cub(x, h + 1, z, 1.49, 0.12, 0.95, "#bdbbb1");
@@ -1013,139 +1588,73 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
         fg,
       );
     }
-    for (const [tx, tz] of [
-      [56, 14],
-      [84, 43],
-      [19, 24],
-      [28, 81],
-      [78, 78],
-    ]) {
-      const base = map.boxes.find(
-        (b) =>
-          b.style === "building" &&
-          Math.abs(b.x - tx) < b.w / 2 &&
-          Math.abs(b.z - tz) < b.d / 2,
-      );
-      if (!base) continue;
-      const start = new THREE.Vector3(tx, base.h + 0.6, tz),
-        end = new THREE.Vector3(tx + 9, base.h + 0.9, tz + 5);
-      let from = start;
-      for (let i = 1; i <= 7; i++) {
-        const t = i / 7,
-          to = start.clone().lerp(end, t);
-        to.y -= Math.sin(t * Math.PI) * 1.1;
-        rod(from, to, 0.022, "#514c3d");
-        from = to;
-      }
-    }
-    for (const lane of [
-      spawn,
-      ...map.callouts.filter(
-        (c) =>
-          c.name === "Long A" || c.name === "Mid" || c.name === "Apartments",
-      ),
-    ]) {
-      const nearby = map.boxes.filter(
-        (b) => b.style === "building" && Math.abs(b.z - (lane.z + 6)) < 10,
-      );
-      const left = nearby
-        .filter((b) => b.x < lane.x)
-        .sort((a, b) => Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x))[0];
-      const right = nearby
-        .filter((b) => b.x > lane.x)
-        .sort((a, b) => Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x))[0];
-      if (!left || !right) continue;
-      const z = lane.z + 5;
-      for (let j = 0; j < 3; j++) {
-        const a = new THREE.Vector3(
-          left.x,
-          Math.min(6.8, left.h) - j * 0.12,
-          z + j * 0.24,
+    if (theme.facade === "market")
+      for (const [tx, tz] of [
+        [56, 14],
+        [84, 43],
+        [19, 24],
+        [28, 81],
+        [78, 78],
+      ]) {
+        const base = map.boxes.find(
+          (b) =>
+            b.style === "building" &&
+            Math.abs(b.x - tx) < b.w / 2 &&
+            Math.abs(b.z - tz) < b.d / 2,
         );
-        const b = new THREE.Vector3(
-          right.x,
-          Math.min(7.4, right.h) - j * 0.16,
-          z + 2.2 + j * 0.32,
-        );
-        let from = a;
-        for (let i = 1; i <= 12; i++) {
-          const u = i / 12,
-            to = a.clone().lerp(b, u);
-          to.y -= Math.sin(u * Math.PI) * (0.8 + j * 0.16);
-          rod(from, to, 0.02, "#45493e");
+        if (!base) continue;
+        const start = new THREE.Vector3(tx, base.h + 0.6, tz),
+          end = new THREE.Vector3(tx + 9, base.h + 0.9, tz + 5);
+        let from = start;
+        for (let i = 1; i <= 7; i++) {
+          const t = i / 7,
+            to = start.clone().lerp(end, t);
+          to.y -= Math.sin(t * Math.PI) * 1.1;
+          rod(from, to, 0.022, "#514c3d");
           from = to;
         }
       }
-    }
-    for (let i = 0; i < 36; i++) {
-      const theta = i * 2.39996,
-        rad = 83 + rng() * 20,
-        x = 52 + Math.sin(theta) * rad,
-        z = 52 + Math.cos(theta) * rad,
-        h = 8 + rng() * 15,
-        w = 6 + rng() * 9;
-      cub(
-        x,
-        h / 2,
-        z,
-        w,
-        h,
-        7 + rng() * 6,
-        dust ? "#c6b392" : "#baa99b",
-        "plaster",
-      );
-      if (i % 6 === 0) {
-        cyl(x, h + 3, z, 1.15, 1.32, 6, "#c6b393");
-        cyl(x, h + 5.8, z, 1.55, 1.5, 0.4, "#d6c2a1");
-        add(
-          new THREE.SphereGeometry(1.25, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
-          x,
-          h + 6,
-          z,
-          dust ? "#81958c" : "#869b9e",
+    if (theme.facade === "market")
+      for (const lane of [
+        spawn,
+        ...map.callouts.filter(
+          (c) =>
+            c.name === "Long A" || c.name === "Mid" || c.name === "Apartments",
+        ),
+      ]) {
+        const nearby = map.boxes.filter(
+          (b) => b.style === "building" && Math.abs(b.z - (lane.z + 6)) < 10,
         );
-        cyl(x, h + 7.4, z, 0.04, 0.12, 1.5, "#ac9a77");
-      }
-    }
-    // Palm silhouettes rise behind the playable walls, keeping walkable space clear.
-    for (let i = 0; i < 23; i++) {
-      const angle = i * 2.39,
-        rad = i % 2 ? 59 : 70,
-        x = 52 + Math.cos(angle) * rad,
-        z = 52 + Math.sin(angle) * rad,
-        h = 7 + rng() * 7;
-      cyl(x, h / 2, z, 0.2, 0.42, h, "#8a7660", 8);
-      for (let j = 0; j < 11; j++) {
-        const a = (j * Math.PI * 2) / 11 + rng() * 0.25,
-          len = 3.0 + rng() * 2.4;
-        const verts: number[] = [];
-        function leaf(t: number, s: number) {
-          const ww = Math.sin(t * Math.PI) * 0.5 * s;
-          return [
-            Math.cos(a) * len * t - Math.sin(a) * ww,
-            Math.sin(t * Math.PI) * 1.15 - t * 1.8,
-            Math.sin(a) * len * t + Math.cos(a) * ww,
-          ];
+        const left = nearby
+          .filter((b) => b.x < lane.x)
+          .sort((a, b) => Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x))[0];
+        const right = nearby
+          .filter((b) => b.x > lane.x)
+          .sort((a, b) => Math.abs(a.x - lane.x) - Math.abs(b.x - lane.x))[0];
+        if (!left || !right) continue;
+        const z = lane.z + 5;
+        for (let j = 0; j < 3; j++) {
+          const a = new THREE.Vector3(
+            left.x,
+            Math.min(6.8, left.h) - j * 0.12,
+            z + j * 0.24,
+          );
+          const b = new THREE.Vector3(
+            right.x,
+            Math.min(7.4, right.h) - j * 0.16,
+            z + 2.2 + j * 0.32,
+          );
+          let from = a;
+          for (let i = 1; i <= 12; i++) {
+            const u = i / 12,
+              to = a.clone().lerp(b, u);
+            to.y -= Math.sin(u * Math.PI) * (0.8 + j * 0.16);
+            rod(from, to, 0.02, "#45493e");
+            from = to;
+          }
         }
-        for (let q = 0; q < 8; q++) {
-          const t = q / 8,
-            u = (q + 1) / 8;
-          for (const [tt, ss] of [
-            [t, -1],
-            [u, 1],
-            [t, 1],
-            [t, -1],
-            [u, -1],
-            [u, 1],
-          ])
-            verts.push(...leaf(tt, ss));
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
-        g.computeVertexNormals();
-        add(g, x, h, z, j % 2 ? "#607456" : "#71805c");
       }
-    }
+    backdrop();
   } else {
     label("25 M", 36, 3.65, 17.055, 3, 1.5, 0, false, "#393c32", "#dbd2b6");
     for (let i = 0; i < 6; i++)
@@ -1161,6 +1670,159 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
         "#e9dbb3",
         "#444c43",
       );
+  }
+  function backdrop() {
+    if (theme.skyline === "below") {
+      // A skyline far below the deck: tower tops sink under the horizon and cranes rise past it.
+      for (let i = 0; i < 46; i++) {
+        const a = i * 2.39996,
+          rad = 80 + rng() * 75,
+          x = 52 + Math.sin(a) * rad,
+          z = 52 + Math.cos(a) * rad,
+          top = -45 + rng() * 62 + (i % 7 === 0 ? 14 : 0),
+          w = 9 + rng() * 12,
+          h = top + 140;
+        cub(
+          x,
+          top - h / 2,
+          z,
+          w,
+          h,
+          8 + rng() * 10,
+          rng() < 0.5 ? "#8ea2b2" : "#a7b3b9",
+          "glass",
+        );
+        cub(x, top + 0.4, z, w * 0.4, 0.8, 3, "#737f86", "metal");
+      }
+      for (const [x, z, yaw] of [
+        [-30, 30, 0.4],
+        [140, 70, 2.2],
+        [60, -40, 1.1],
+      ]) {
+        cub(x, 5, z, 1.2, 70, 1.2, theme.accent, "metal");
+        const jib = new THREE.BoxGeometry(46, 1, 1.1);
+        jib.translate(12, 0, 0);
+        add(jib, x, 40, z, theme.accent, "plain", yaw);
+        cub(x, 42.5, z, 1.6, 4, 1.6, theme.accent, "metal");
+      }
+      return;
+    }
+    for (let i = 0; i < 36; i++) {
+      const theta = i * 2.39996,
+        rad = 83 + rng() * 20,
+        x = 52 + Math.sin(theta) * rad,
+        z = 52 + Math.cos(theta) * rad,
+        h = 8 + rng() * 15,
+        w = 6 + rng() * 9;
+      cub(
+        x,
+        h / 2,
+        z,
+        w,
+        h,
+        7 + rng() * 6,
+        theme.skylineColor,
+        theme.skyline === "cooling" ? "concrete" : "plaster",
+      );
+      if (i % 6 !== 0) continue;
+      if (theme.skyline === "domes") {
+        cyl(x, h + 3, z, 1.15, 1.32, 6, theme.skylineColor);
+        cyl(x, h + 5.8, z, 1.55, 1.5, 0.4, "#d6c2a1");
+        add(
+          new THREE.SphereGeometry(1.25, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+          x,
+          h + 6,
+          z,
+          theme.accent,
+        );
+        cyl(x, h + 7.4, z, 0.04, 0.12, 1.5, "#ac9a77");
+      } else if (theme.skyline === "towers") {
+        cub(x, h + 5, z, 2.6, 10, 2.6, theme.skylineColor, "stone");
+        cub(x, h + 9, z, 2.9, 0.3, 2.9, "#c9b08c");
+        const roof = new THREE.ConeGeometry(2.1, 3, 4);
+        roof.rotateY(Math.PI / 4);
+        add(roof, x, h + 11.6, z, theme.accent);
+      } else {
+        cyl(x, h + 9, z, 0.6, 0.9, 18, "#9aa2a3", 10);
+        cyl(x, h + 17.6, z, 0.92, 0.92, 0.8, "#b5473a", 10);
+      }
+    }
+    if (theme.skyline === "cooling") {
+      for (const [x, z, s] of [
+        [-38, 20, 1],
+        [-30, 82, 0.85],
+        [140, 40, 1.1],
+      ]) {
+        const pts: THREE.Vector2[] = [];
+        for (let k = 0; k <= 16; k++) {
+          const v = k / 16,
+            r =
+              15 * s * (0.62 + 0.55 * (v - 0.68) ** 2 * (v < 0.68 ? 1.3 : 3.2));
+          pts.push(new THREE.Vector2(r, v * 52 * s));
+        }
+        add(new THREE.LatheGeometry(pts, 28), x, 0, z, "#c7cbc8", "concrete");
+      }
+    }
+    if (theme.trees === "palm") {
+      // Palm silhouettes rise behind the playable walls, keeping walkable space clear.
+      for (let i = 0; i < 23; i++) {
+        const angle = i * 2.39,
+          rad = i % 2 ? 59 : 70,
+          x = 52 + Math.cos(angle) * rad,
+          z = 52 + Math.sin(angle) * rad,
+          h = 7 + rng() * 7;
+        cyl(x, h / 2, z, 0.2, 0.42, h, "#8a7660", 8);
+        for (let j = 0; j < 11; j++) {
+          const a = (j * Math.PI * 2) / 11 + rng() * 0.25,
+            len = 3.0 + rng() * 2.4;
+          const verts: number[] = [];
+          function leaf(t: number, s: number) {
+            const ww = Math.sin(t * Math.PI) * 0.5 * s;
+            return [
+              Math.cos(a) * len * t - Math.sin(a) * ww,
+              Math.sin(t * Math.PI) * 1.15 - t * 1.8,
+              Math.sin(a) * len * t + Math.cos(a) * ww,
+            ];
+          }
+          for (let q = 0; q < 8; q++) {
+            const t = q / 8,
+              u = (q + 1) / 8;
+            for (const [tt, ss] of [
+              [t, -1],
+              [u, 1],
+              [t, 1],
+              [t, -1],
+              [u, -1],
+              [u, 1],
+            ])
+              verts.push(...leaf(tt, ss));
+          }
+          const g = new THREE.BufferGeometry();
+          g.setAttribute(
+            "position",
+            new THREE.Float32BufferAttribute(verts, 3),
+          );
+          g.computeVertexNormals();
+          add(g, x, h, z, j % 2 ? "#607456" : "#71805c");
+        }
+      }
+    } else if (theme.trees === "cypress") {
+      for (let i = 0; i < 30; i++) {
+        const angle = i * 2.39,
+          rad = i % 2 ? 58 : 68,
+          x = 52 + Math.cos(angle) * rad,
+          z = 52 + Math.sin(angle) * rad,
+          h = 8 + rng() * 6;
+        cyl(x, 1, z, 0.18, 0.25, 2, "#6a5541", 6);
+        add(
+          new THREE.ConeGeometry(1.1, h, 9),
+          x,
+          h / 2 + 1.2,
+          z,
+          i % 3 ? "#4c5e3a" : "#58693f",
+        );
+      }
+    }
   }
   for (const { geo, mat } of batch.values()) {
     if (!geo.length) continue;
@@ -1199,7 +1861,24 @@ export class GameRenderer {
   private camera = new THREE.PerspectiveCamera(74, 1, 0.045, 420);
   private handsCam = new THREE.PerspectiveCamera(68, 1, 0.015, 3);
   private sun = new THREE.DirectionalLight(0xffe5bd, 2.0);
-  private people = new Map<number, ReturnType<typeof humanoid>>();
+  private people = new Map<number, Humanoid>();
+  private ragdolls = new Map<number, Ragdoll>();
+  private clouds = new Map<
+    number,
+    { group: THREE.Group; mat: THREE.SpriteMaterial; seeds: number[][] }
+  >();
+  private flames = new Map<
+    number,
+    {
+      group: THREE.Group;
+      mat: THREE.SpriteMaterial;
+      scorch: THREE.Mesh;
+      seeds: number[][];
+    }
+  >();
+  private puff = softTexture("smoke");
+  private flame = softTexture("flame");
+  private nadeMats = new Map<string, THREE.MeshStandardMaterial>();
   private arsenal = new Map<string, THREE.Group>();
   private currentGun = "";
   private bomb: THREE.Group;
@@ -1245,10 +1924,11 @@ export class GameRenderer {
     this.renderer.autoClear = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    this.scene.background = sky(map.id === "dust2");
+    const theme = themeOf(map.id);
+    this.scene.background = sky(theme);
     this.scene.fog = new THREE.FogExp2(
-      map.id === "dust2" ? 0xe1c49d : 0xcac0ad,
-      0.0065,
+      map.id === "range" ? 0xcac0ad : theme.fog,
+      map.id === "range" ? 0.0065 : theme.fogDensity,
     );
     this.scene.add(new THREE.HemisphereLight(0xd6e4e9, 0xaa9270, 2.25));
     this.sun.position.set(map.width * 0.5 - 42, 65, map.depth * 0.5 - 30);
@@ -1274,7 +1954,14 @@ export class GameRenderer {
     this.bomb = gun("bomb");
     this.bomb.visible = false;
     this.scene.add(this.bomb);
-    const nadeMat = new THREE.MeshStandardMaterial({ color: 0x666d4d }),
+    for (const [k, c] of [
+      ["he", 0x666d4d],
+      ["flash", 0xa5a69b],
+      ["smoke", 0x59625a],
+      ["molly", 0x7a5226],
+    ] as const)
+      this.nadeMats.set(k, new THREE.MeshStandardMaterial({ color: c }));
+    const nadeMat = this.nadeMats.get("he")!,
       nadeGeo = new THREE.IcosahedronGeometry(0.09, 1);
     for (let i = 0; i < 12; i++) {
       const g = new THREE.Mesh(nadeGeo, nadeMat);
@@ -1398,6 +2085,142 @@ export class GameRenderer {
       point.z + normal.z * 0.01,
     );
     d.visible = true;
+  }
+  /** Starts a ragdoll fall for a player who has just died, away from the attacker. */
+  death(
+    id: number,
+    dir: { x: number; z: number },
+    head: boolean,
+    time: number,
+  ) {
+    this.ragdolls.set(id, {
+      t0: time,
+      dir,
+      head,
+      side: (id * 7919) % 2 ? 1 : -1,
+    });
+  }
+  private updateSmokes(f: RenderFrame, t: number) {
+    const live = new Set<number>();
+    for (const c of f.smokes ?? []) {
+      live.add(c.id);
+      let cloud = this.clouds.get(c.id);
+      if (!cloud) {
+        const mat = new THREE.SpriteMaterial({
+          map: this.puff,
+          color: 0xb9bbb4,
+          transparent: true,
+          depthWrite: false,
+          fog: true,
+        });
+        const group = new THREE.Group(),
+          rng = seeded(c.id * 7717 + 13),
+          seeds: number[][] = [];
+        for (let i = 0; i < 38; i++) {
+          const a = rng() * Math.PI * 2,
+            r = Math.sqrt(rng()) * 0.74,
+            y = 0.4 + rng() * 2.6,
+            size = 2.6 + rng() * 1.8;
+          seeds.push([Math.cos(a) * r, y, Math.sin(a) * r, size, rng() * 6]);
+          const sprite = new THREE.Sprite(mat);
+          group.add(sprite);
+        }
+        this.scene.add(group);
+        cloud = { group, mat, seeds };
+        this.clouds.set(c.id, cloud);
+      }
+      const bloom = Math.min(1, Math.max(0.15, (t - c.born) / 1.1)),
+        fade = Math.min(1, Math.max(0, (c.until - t) / 2));
+      cloud.group.position.set(c.x, c.y, c.z);
+      cloud.mat.opacity = Math.min(1, fade * 1.15);
+      cloud.group.children.forEach((sp, i) => {
+        const [x, y, z, size, phase] = cloud.seeds[i],
+          drift = Math.sin(t * 0.35 + phase) * 0.18,
+          r = c.r * bloom;
+        sp.position.set(
+          x * r + drift,
+          y * (0.45 + 0.55 * bloom),
+          z * r - drift,
+        );
+        sp.scale.setScalar(size * (0.35 + 0.65 * bloom) * (0.85 + 0.15 * fade));
+      });
+    }
+    for (const [id, cloud] of this.clouds)
+      if (!live.has(id)) {
+        this.scene.remove(cloud.group);
+        cloud.mat.dispose();
+        this.clouds.delete(id);
+      }
+  }
+  private updateFires(f: RenderFrame, t: number) {
+    const live = new Set<number>();
+    for (const fire of f.fires ?? []) {
+      live.add(fire.id);
+      let fx = this.flames.get(fire.id);
+      if (!fx) {
+        const mat = new THREE.SpriteMaterial({
+          map: this.flame,
+          color: 0xffb35c,
+          transparent: true,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+        });
+        const group = new THREE.Group(),
+          rng = seeded(fire.id * 3301 + 7),
+          seeds: number[][] = [];
+        for (let i = 0; i < 26; i++) {
+          const a = rng() * Math.PI * 2,
+            r = Math.sqrt(rng()) * fire.r * 0.85;
+          seeds.push([
+            Math.cos(a) * r,
+            Math.sin(a) * r,
+            0.5 + rng() * 0.7,
+            rng() * 6,
+          ]);
+          group.add(new THREE.Sprite(mat));
+        }
+        const scorch = new THREE.Mesh(
+          new THREE.CircleGeometry(fire.r * 1.05, 24),
+          new THREE.MeshBasicMaterial({
+            color: 0x1a1410,
+            transparent: true,
+            opacity: 0.6,
+            depthWrite: false,
+            polygonOffset: true,
+            polygonOffsetFactor: -2,
+          }),
+        );
+        scorch.rotation.x = -Math.PI / 2;
+        scorch.position.y = 0.03;
+        group.add(scorch);
+        this.scene.add(group);
+        fx = { group, mat, scorch, seeds };
+        this.flames.set(fire.id, fx);
+      }
+      const grow = Math.min(1, (t - fire.born) / 0.35),
+        fade = Math.min(1, Math.max(0, (fire.until - t) / 1.2));
+      fx.group.position.set(fire.x, fire.y, fire.z);
+      fx.mat.opacity = 0.85 * fade;
+      for (let i = 0; i < fx.seeds.length; i++) {
+        const [x, z, size, phase] = fx.seeds[i],
+          sp = fx.group.children[i],
+          flicker =
+            0.75 +
+            0.35 * Math.sin(t * 17 + phase * 3) * Math.sin(t * 7.3 + phase);
+        const h = size * flicker * grow * (0.6 + 0.4 * fade);
+        sp.position.set(x * grow, h * 0.45, z * grow);
+        sp.scale.set(size * 0.8 * grow, h * 1.3, 1);
+      }
+    }
+    for (const [id, fx] of this.flames)
+      if (!live.has(id)) {
+        this.scene.remove(fx.group);
+        fx.mat.dispose();
+        fx.scorch.geometry.dispose();
+        (fx.scorch.material as THREE.Material).dispose();
+        this.flames.delete(id);
+      }
   }
   shot(from: Vec3, to: Vec3, weapon = "", local = false) {
     if (weapon !== "m4" && weapon !== "M4A1-S") {
@@ -1601,7 +2424,16 @@ export class GameRenderer {
         this.people.set(p.id, model);
         this.scene.add(model.root);
       }
-      model.root.visible = p.alive && p.id !== f.viewId;
+      if (p.alive) this.ragdolls.delete(p.id);
+      else if (!this.ragdolls.has(p.id))
+        this.death(
+          p.id,
+          { x: -Math.sin(p.yaw), z: Math.cos(p.yaw) },
+          false,
+          t - 5,
+        );
+      const rag = this.ragdolls.get(p.id);
+      model.root.visible = p.id !== f.viewId && (p.alive || !!rag);
       const last = p.last ?? p,
         alpha = f.alpha ?? 1;
       model.root.position.set(
@@ -1609,12 +2441,9 @@ export class GameRenderer {
         last.y + (p.y - last.y) * alpha,
         last.z + (p.z - last.z) * alpha,
       );
-      model.root.rotation.y = -p.yaw;
-      model.root.scale.y = p.crouched ? 0.75 : 1;
-      for (let i = 0; i < 2; i++)
-        model.legs[i].rotation.x = p.moving
-          ? Math.sin(t * 10 + p.id + i * Math.PI) * 0.44
-          : 0;
+      model.body.rotation.y = -p.yaw;
+      model.body.scale.y = p.crouched && p.alive ? 0.75 : 1;
+      pose(model, rag, t, !!p.moving, p.id);
     }
     this.bomb.visible = !!f.bomb;
     if (f.bomb) this.bomb.position.set(f.bomb.x, f.bomb.y + 0.09, f.bomb.z);
@@ -1622,8 +2451,13 @@ export class GameRenderer {
       const pos = f.grenades?.[i],
         g = this.throws[i];
       g.visible = !!pos;
-      if (pos) g.position.set(pos.x, pos.y, pos.z);
+      if (pos) {
+        g.position.set(pos.x, pos.y, pos.z);
+        g.material = this.nadeMats.get(pos.type ?? "he") ?? g.material;
+      }
     }
+    this.updateSmokes(f, t);
+    this.updateFires(f, t);
     for (const trace of this.tracers) {
       trace.ttl -= elapsed;
       trace.line.visible = trace.ttl > 0;
@@ -1654,9 +2488,15 @@ export class GameRenderer {
       dip = Math.sin(reload * Math.PI);
     if (rig) {
       rig.visible = !zoom && !f.spectating;
-      const short = ["deagle", "glock", "he", "flash", "bomb"].includes(
-        f.weapon,
-      );
+      const short = [
+        "deagle",
+        "glock",
+        "he",
+        "flash",
+        "smoke",
+        "molly",
+        "bomb",
+      ].includes(f.weapon);
       rig.position.set(
         0.205 + Math.sin(t * 6.5) * 0.009 * move,
         -0.205 + Math.cos(t * 13) * 0.006 * move - 0.13 * dip,
@@ -1690,6 +2530,11 @@ export class GameRenderer {
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.people.clear();
+    this.ragdolls.clear();
+    this.clouds.clear();
+    this.flames.clear();
+    this.puff.dispose();
+    this.flame.dispose();
     this.arsenal.clear();
     this.scene.clear();
     this.hands.clear();

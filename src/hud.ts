@@ -1,8 +1,16 @@
 import type { Sim, SimEvent } from "./sim/Sim";
-import { catalog, shop, isGun, weaponName, type Item } from "./config/weapons";
+import {
+  catalog,
+  shop,
+  isGun,
+  isNade,
+  weaponName,
+  type Item,
+} from "./config/weapons";
 import { patterns } from "./config/recoilPatterns";
 import type { Player } from "./sim/player";
 import { hubUrl } from "./hub/navigation";
+import { keyName, mountBindEditor } from "./keybinds";
 const money = (v: number) => "$" + v.toLocaleString("en-US");
 const clock = (v: number) => {
   const seconds = Math.ceil(Math.max(0, v));
@@ -15,12 +23,14 @@ function label(el: HTMLElement, value: string) {
 }
 const categories: [string, Item[]][] = [
   ["Sidearms", ["glock", "deagle"]],
-  ["Rifles", ["ak", "m4"]],
-  ["Sniper", ["awp"]],
-  ["Heavy", ["negev"]],
-  ["Utility", ["he", "flash"]],
+  ["SMGs", ["p90"]],
+  ["Rifles", ["ak", "m4", "m4a4", "aug"]],
+  ["Snipers", ["ssg", "awp"]],
+  ["Heavy", ["nova", "xm", "negev"]],
+  ["Utility", ["he", "flash", "smoke", "molly"]],
   ["Equipment", ["kevlar", "helmet", "kit"]],
 ];
+const streak = ["", "", "DOUBLE KILL", "TRIPLE KILL", "QUAD KILL", "ACE"];
 export class MatchHud {
   root = document.createElement("div");
   radar: CanvasRenderingContext2D;
@@ -34,6 +44,8 @@ export class MatchHud {
   hurtEnd = 0;
   hintEnd = 0;
   hint = "";
+  popEnd = 0;
+  unbind: (() => void) | null = null;
   abort = new AbortController();
   constructor(
     parent: HTMLElement,
@@ -54,7 +66,8 @@ export class MatchHud {
  <div class="csw-strip"><b class="csw-ct" data-ui="ct"></b><div><small data-ui="round"></small><strong data-ui="clock" data-testid="round-timer"></strong></div><b class="csw-t" data-ui="t"></b></div>
  <div class="csw-killfeed" data-ui="feed"></div><div class="csw-hit" data-ui="hit"></div><div class="csw-hurt" data-ui="hurt"></div><div class="csw-cross" data-ui="cross"></div><div class="csw-scope" data-ui="scope" hidden></div>
  <div class="csw-center-msg"><small data-ui="phase"></small><strong data-ui="banner"></strong><span data-ui="prompt"></span><progress data-ui="progress" hidden></progress></div>
- <div class="csw-vitals"><div><small>HEALTH</small><strong data-ui="hp"></strong></div><div><small>ARMOR</small><strong data-ui="armor"></strong></div></div>
+ <div class="csw-vitals"><div><small>HEALTH</small><strong data-ui="hp"></strong></div><div><small>ARMOR</small><strong data-ui="armor"></strong></div><div class="csw-kills"><small>KILLS</small><strong data-ui="kills" data-testid="kill-counter"></strong><span data-ui="tally" aria-hidden="true"></span></div></div>
+ <div class="csw-smoke" data-ui="smoke"></div><div class="csw-killpop" data-ui="killpop" aria-hidden="true"></div>
  <div class="csw-ammo"><small data-ui="weapon"></small><strong data-ui="ammo"></strong><span data-ui="reserve"></span></div>
  <div class="csw-debug" data-ui="debug" hidden><span data-ui="metrics"></span><canvas data-ui="spray" width="96" height="68" aria-label="Weapon recoil pattern"></canvas></div><div class="csw-flash" data-ui="flash"></div>
  <div class="csw-panel" data-ui="panel" hidden></div><div class="csw-a11y" aria-live="polite" data-ui="status"></div>`;
@@ -107,6 +120,8 @@ export class MatchHud {
     );
   }
   panel(mode: string, html: string) {
+    this.unbind?.();
+    this.unbind = null;
     this.mode = mode;
     this.ids.panel.hidden = false;
     this.ids.panel.innerHTML =
@@ -116,6 +131,8 @@ export class MatchHud {
       ?.focus({ preventScroll: true });
   }
   close() {
+    this.unbind?.();
+    this.unbind = null;
     this.mode = "";
     this.ids.panel.hidden = true;
     this.ids.panel.replaceChildren();
@@ -155,7 +172,10 @@ export class MatchHud {
           )
           .join("") +
         '</div><p aria-live="polite">' +
-        (message || "Number keys select a category. B closes the armory.") +
+        (message ||
+          "Number keys select a category. " +
+            keyName("buy") +
+            " closes the armory.") +
         "</p>" +
         this.button("return", "Return to match", "csw-cta"),
     );
@@ -200,7 +220,7 @@ export class MatchHud {
         team +
         " · " +
         this.sim.score[team] +
-        "</caption><thead><tr><th>Operator</th><th>K</th><th>D</th><th>Cash</th><th>Link</th></tr></thead>";
+        "</caption><thead><tr><th>Operator</th><th>K</th><th>D</th><th>HS</th><th>Cash</th><th>Link</th></tr></thead>";
       const body = table.createTBody();
       for (const p of this.sim.players
         .filter((p) => p.team === team)
@@ -210,6 +230,7 @@ export class MatchHud {
           p.name + (p.alive ? "" : " †"),
           p.kills,
           p.deaths,
+          p.headshots,
           team === this.sim.me.team ? money(p.money) : "—",
           p.id ? "BOT" : "LOCAL",
         ])
@@ -222,21 +243,38 @@ export class MatchHud {
     volume: number,
     sensitivity: number,
     shadows: boolean,
+    fullscreen: boolean,
     update: (key: string, v: number | boolean) => void,
   ) {
+    const check = (name: string, label: string, on: boolean) =>
+      "<label>" +
+      label +
+      ' <input name="' +
+      name +
+      '" type="checkbox" ' +
+      (on ? "checked" : "") +
+      "></label>";
     this.panel(
       "Settings",
       '<header><div><small>FIELD CONFIGURATION</small><h2>Settings & controls</h2></div></header><div class="csw-controls"><label>Volume <input name="volume" type="range" min="0" max="1" step=".01" value="' +
         volume +
         '"></label><label>Sensitivity <input name="sensitivity" type="range" min=".2" max="5" step=".1" value="' +
         sensitivity +
-        '"></label><label>Shadows <input name="shadows" type="checkbox" ' +
-        (shadows ? "checked" : "") +
-        "></label><p>WASD move · Shift walk · Ctrl crouch · Space jump<br>Left mouse fire · Right mouse scope / lob · R reload<br>1 / 2 / 4 / 5 select slot · Q previous · E plant / defuse<br>B armory · Tab scoreboard · Esc pause</p></div>" +
+        '"></label>' +
+        check("shadows", "Shadows", shadows) +
+        check(
+          "fullscreen",
+          "Fullscreen (Esc returns to the browser)",
+          fullscreen,
+        ) +
+        "<h3>Key bindings</h3><div data-binds></div></div>" +
         this.button("return", "Resume match", "csw-cta"),
     );
+    this.unbind = mountBindEditor(
+      this.ids.panel.querySelector("[data-binds]")!,
+    );
     this.ids.panel
-      .querySelectorAll<HTMLInputElement>("input")
+      .querySelectorAll<HTMLInputElement>(".csw-controls > label input")
       .forEach(
         (input) =>
           (input.oninput = () =>
@@ -261,12 +299,31 @@ export class MatchHud {
           src +
           "  /  " +
           (e.weapon ? weaponName(e.weapon) : "") +
+          (e.head ? " ✛" : "") +
           "  /  " +
           victim +
           (e.wallbang ? " · Wallbang" : ""),
         until: s.time + 6,
       });
       this.feed = this.feed.slice(0, 5);
+    }
+    if (e.type === "kill" && e.actor === 0 && e.victim !== 0) {
+      const me = s.me,
+        pop = this.ids.killpop;
+      pop.textContent = "";
+      const big = document.createElement("strong");
+      big.textContent = streak[Math.min(5, me.roundKills)] || "ELIMINATED";
+      const small = document.createElement("small");
+      small.textContent =
+        s.players[e.victim!].name +
+        (e.head ? " · HEADSHOT" : "") +
+        (e.wallbang ? " · WALLBANG" : "");
+      pop.append(big, small);
+      pop.classList.remove("on");
+      void pop.offsetWidth;
+      pop.classList.add("on");
+      pop.classList.toggle("head", !!e.head);
+      this.popEnd = s.time + 1.6;
     }
     if (e.type === "hit") {
       if (e.actor === 0) {
@@ -349,6 +406,18 @@ export class MatchHud {
         ctx.fill();
       }
     }
+    for (const c of s.smokes) {
+      ctx.fillStyle = "#c9cdc499";
+      ctx.beginPath();
+      ctx.arc(c.x * k, c.z * k, s.smokeRadius(c) * k, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    for (const f of s.fires) {
+      ctx.fillStyle = "#ff7a3a88";
+      ctx.beginPath();
+      ctx.arc(f.x * k, f.z * k, f.r * k, 0, Math.PI * 2);
+      ctx.fill();
+    }
     if (s.bomb && (s.phase === "planted" || s.me.team === "T")) {
       ctx.fillStyle = "#ff9963";
       ctx.fillRect(s.bomb.x * k - 2, s.bomb.z * k - 2, 5, 5);
@@ -361,6 +430,22 @@ export class MatchHud {
     this.root.dataset.phase = s.phase;
     el.hit.style.opacity = String(s.time < this.hitEnd ? 1 : 0);
     el.hurt.style.opacity = String(s.time < this.hurtEnd ? 0.5 : 0);
+    const eye = view.eye;
+    let haze = 0;
+    for (const c of s.smokes) {
+      const d = Math.hypot(
+          eye.x - c.x,
+          (eye.y - c.y - 1.25) * 1.35,
+          eye.z - c.z,
+        ),
+        r = s.smokeRadius(c);
+      haze = Math.max(haze, clamp01((r - d) / (r * 0.45)));
+    }
+    el.smoke.style.opacity = String(view.alive ? haze * 0.97 : 0);
+    if (this.popEnd && s.time > this.popEnd) {
+      el.killpop.classList.remove("on");
+      this.popEnd = 0;
+    }
     el.flash.style.opacity = String(
       clamp01((p.blinded - s.time) / ((p.blindDuration || 1) * 0.5)) *
         (reduce ? 0.5 : 1),
@@ -374,18 +459,17 @@ export class MatchHud {
     label(el.clock, clock(s.left));
     label(el.hp, String(Math.ceil(view.hp)));
     label(el.armor, String(Math.ceil(view.armor)));
+    label(el.kills, String(view.kills));
+    label(
+      el.tally,
+      "✕".repeat(Math.min(5, view.roundKills)) +
+        (view.headshots ? "  HS " + view.headshots : ""),
+    );
     label(el.cash, money(p.money));
     label(el.weapon, weaponName(view.weapon));
     label(
       el.ammo,
-      String(
-        view.mag?.ammo ??
-          (view.weapon === "he"
-            ? view.he
-            : view.weapon === "flash"
-              ? view.flash
-              : "•"),
-      ),
+      String(view.mag?.ammo ?? (isNade(view.weapon) ? view[view.weapon] : "•")),
     );
     label(el.reserve, view.mag ? " / " + view.mag.reserve : "");
     const site = s.map.callouts.reduce(
@@ -431,9 +515,9 @@ export class MatchHud {
           : s.work && s.worker === p.id
             ? s.action + "ing…"
             : objective
-              ? "Hold E to " + objective.toLowerCase()
+              ? "Hold " + keyName("use") + " to " + objective.toLowerCase()
               : s.canBuy(p)
-                ? "B  /  Open buy menu"
+                ? keyName("buy") + "  /  Open buy menu"
                 : view.reloadEnd
                   ? "Reloading…"
                   : s.carrier === 0

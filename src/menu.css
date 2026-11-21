@@ -392,8 +392,8 @@
 }
 .csw-mapgrid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 11px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
 }
 .csw-lobby .csw-mapcard {
   display: block;
@@ -401,7 +401,7 @@
   position: relative;
   isolation: isolate;
   overflow: hidden;
-  height: clamp(78px, 10.5vh, 132px);
+  height: clamp(62px, 8.6vh, 112px);
   padding: 0;
   border-radius: 1px;
   border: 1px solid #53594c;
