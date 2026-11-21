@@ -47,6 +47,12 @@ Open the buy menu in your spawn during the 15-second freeze or the first 20 seco
 
 The browser checks use Edge on Windows. On other platforms install the Playwright Chromium browser with `npx playwright install chromium`, or select an installed channel with `CS_WEB_BROWSER_CHANNEL`.
 
+## GitHub Pages
+
+Set the repository's Pages source to **GitHub Actions**. The **Deploy GitHub Pages** workflow builds and publishes `dist/` after a push to `main`, with asset URLs rooted at the repository's Pages path. Local builds default to `/cs-web/` for Game Hub.
+
+[Play on GitHub Pages](https://vortezler.github.io/Counter-Attack-Web/)
+
 ## Game Hub
 
 The standalone build works with no backend configuration. For guest restoration, copy `.env.example` to `.env.local` and set the same browser-safe Supabase URL and publishable key as Game Hub. Serve the two applications on the same origin for shared guest storage. The game stores local preferences under `cs-web:` and signs in no new users.
