@@ -1,5 +1,8 @@
 export function hubUrl(): string {
-  return import.meta.env.DEV ? "http://127.0.0.1:5173/game-hub/" : "/game-hub/";
+  const parent = new URLSearchParams(location.hash.slice(1)).get("parent");
+  if (location.hostname === "127.0.0.1" && parent === "http://127.0.0.1:4175") return parent + "/game-hub/";
+  if (import.meta.env.DEV) return "http://127.0.0.1:5173/game-hub/";
+  return location.hostname === "vortezler.github.io" ? "https://kumori1313.github.io/game-hub/" : "/game-hub/";
 }
 
 export function consumeRoomRequest(): string | null {

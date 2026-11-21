@@ -73,6 +73,8 @@ const advance = (p: Vec3, d: Vec3, len: number) => ({
 const other = (t: Team): Team => (t === "T" ? "CT" : "T");
 export class Sim {
   physics: Physics;
+  viewer = 0;
+  remotePlayer?: number;
   players: Player[] = [];
   rng: () => number;
   time = 0;
@@ -139,7 +141,7 @@ export class Sim {
     }
   }
   get me() {
-    return this.players[0];
+    return this.players[this.viewer];
   }
   onEvent(cb: (e: SimEvent) => void) {
     this.listeners.add(cb);
@@ -203,7 +205,7 @@ export class Sim {
     for (const p of this.players)
       if (
         this.map.id !== "range" &&
-        (p.id || this.botsOnly) &&
+        (this.botsOnly || (p.id !== 0 && p.id !== this.remotePlayer)) &&
         !(this.round === 1 && fresh)
       )
         this.botBuy(p);
@@ -347,7 +349,7 @@ export class Sim {
     if (this.phase === "warmup" && this.left <= 0) {
       this.phase = "freeze";
       this.left = 15;
-      for (const p of this.players) if (p.id || this.botsOnly) this.botBuy(p);
+      for (const p of this.players) if (this.botsOnly || (p.id !== 0 && p.id !== this.remotePlayer)) this.botBuy(p);
     }
     if (this.phase === "ended") {
       if (this.left <= 0) {
@@ -384,7 +386,7 @@ export class Sim {
     let acting = -1;
     for (const p of this.players) {
       if (!p.alive) continue;
-      const bot = p.id !== 0 || this.botsOnly;
+      const bot = this.botsOnly || (p.id !== 0 && p.id !== this.remotePlayer);
       const cmd =
         commands[p.id] ??
         (bot && active && this.map.id !== "range"

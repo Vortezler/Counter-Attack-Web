@@ -422,3 +422,17 @@ body {
   margin-top: 4px;
   border-top: 1px solid #65745d;
 }
+
+.csw-peer-status {
+  position: fixed;
+  z-index: 100;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 35rem);
+  padding: 1rem 1.5rem;
+  background: #171b17;
+  color: #f3f6e9;
+  border: 1px solid #68785e;
+}
+.csw-peer-status a { color: #daf39a; }

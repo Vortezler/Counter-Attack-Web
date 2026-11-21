@@ -9,7 +9,9 @@ import { hubUrl } from "./hub/navigation";
 import { savePlayerName, writeSetting } from "./hub/storage";
 import type { GameRenderer } from "./render";
 import type { Sim, SimEvent } from "./sim/Sim";
-import type { PlayerCommand } from "./sim/player";
+import { idle, type PlayerCommand } from "./sim/player";
+import { applyFrame, peerPlayer, projectFrame, readCommand, readEvent, record } from "./sim/peer-state";
+import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
 import type { MapId } from "./world";
@@ -24,6 +26,7 @@ export interface GameOptions extends Partial<Omit<MenuChoice, "settings">> {
   botsOnly?: boolean;
   fly?: boolean;
   notice?: string;
+  peer?: PeerMatch;
 }
 export interface GameHandle {
   destroy(): void;
@@ -81,6 +84,42 @@ export async function createGame(
     events = new Map<string, Set<(e: SimEvent) => void>>();
   const reduced = matchMedia("(prefers-reduced-motion: reduce)");
   const fly = !!opts.fly;
+  const network = opts.peer;
+  const host = !!network?.launch.host;
+  let remoteCommand: PlayerCommand | null = null;
+  let remoteAt = 0;
+  let remoteBuy: string | undefined;
+  let remoteSlot: number | undefined;
+  let remoteFrame: unknown;
+  let remoteGrenades: ReturnType<typeof projectFrame>["grenades"] = [];
+  let lastSentFrame = -1;
+  let lastSentAt = 0;
+  let inputTick = 0;
+  let remoteTick = -1;
+  if (network) network.onPacket = packet => {
+    if (!record(packet)) return;
+    if (host && packet.type === "input") {
+      const input = readCommand(packet.command);
+      if (!input || typeof packet.sequence !== "number" || !Number.isSafeInteger(packet.sequence)
+        || packet.sequence < 0) return;
+      // A reload creates a fresh input stream. Only the active channel can deliver it.
+      if (typeof packet.stream !== "string" || packet.stream.length !== 36) return;
+      if (packet.stream !== remoteStream) { remoteStream = packet.stream; remoteTick = -1; }
+      if (packet.sequence <= remoteTick) return;
+      remoteTick = packet.sequence;
+      remoteCommand = input;
+      remoteAt = performance.now();
+      if (input.buy) remoteBuy = input.buy;
+      if (input.slot) remoteSlot = input.slot;
+    } else if (!host && packet.type === "frame") {
+      remoteFrame = packet.frame;
+    } else if (!host && packet.type === "event") {
+      const event = readEvent(packet.event);
+      if (event) ingest(event);
+    }
+  };
+  let remoteStream = "";
+  const inputStream = network ? crypto.randomUUID() : "";
   let flyPos = { x: 0, y: 0, z: 0 };
   const currentLock = () => !!canvas && document.pointerLockElement === canvas;
   function clearInput() {
@@ -129,6 +168,7 @@ export async function createGame(
   }
   function exit() {
     destroy();
+    if (network) network.close(true);
     if (opts.onExit) opts.onExit();
     else location.assign(hubUrl());
   }
@@ -203,10 +243,10 @@ export async function createGame(
     hud?.event(e);
     audio.play(e);
     if (e.type === "shot" && e.pos && e.end)
-      renderer?.shot(e.pos, e.end, e.weapon, e.actor === 0);
+      renderer?.shot(e.pos, e.end, e.weapon, e.actor === s.me.id);
     if (e.type === "impact" && e.pos && e.normal)
       renderer?.impact(e.pos, e.normal);
-    if (opts.debug && e.type === "trace" && e.actor === 0 && e.pos && e.end)
+    if (opts.debug && e.type === "trace" && e.actor === s.me.id && e.pos && e.end)
       renderer?.trace(e.pos, e.end, e.message ?? "air");
     if ((e.type === "explosion" || e.type === "flash") && e.pos)
       renderer?.burst(e.pos, e.type);
@@ -270,6 +310,12 @@ export async function createGame(
         opts.seed ?? (Math.random() * 0xffffffff) >>> 0,
         opts.botsOnly,
       );
+      if (network) {
+        sim.remotePlayer = peerPlayer;
+        sim.viewer = host ? 0 : peerPlayer;
+        sim.players[0].name = network.launch.hostName;
+        sim.players[peerPlayer].name = network.launch.peerName;
+      }
       renderer = new engine.GameRenderer(canvas!, map);
       hud = new overlay.MatchHud(
         stage!,
@@ -277,16 +323,24 @@ export async function createGame(
         {
           resume,
           pause,
-          restart: () => {
-            void start(choice, true);
-          },
-          lobby: menuScreen,
+          restart: network ? exit : () => { void start(choice, true); },
+          lobby: network ? exit : menuScreen,
+          buy: network && !host ? item => {
+            network.send({ type: "input", sequence: ++inputTick, stream: inputStream,
+              command: { ...idle(yaw, pitch), buy: item } });
+            return "Purchase requested";
+          } : undefined,
           exit,
           settings: config,
         },
         opts.debug,
       );
-      sim.onEvent(ingest);
+      sim.onEvent(event => {
+        ingest(event);
+        if (host && event.type !== "trace" && event.type !== "matchEnd") {
+          network?.send({ type: "event", event });
+        }
+      });
       status.remove();
       settings(c.settings);
       yaw = sim.me.yaw;
@@ -553,7 +607,16 @@ export async function createGame(
     const elapsed = Math.min(0.18, (now - prev) / 1000);
     prev = now;
     if (elapsed > 0) frameRate += (1 / elapsed - frameRate) * 0.04;
-    if (!paused) {
+    if (network && !host && remoteFrame) {
+      const finished = s.phase === "finished";
+      const latest = applyFrame(s, remoteFrame);
+      if (latest) {
+        remoteGrenades = latest;
+        if (!finished && s.phase === "finished") ingest({ type: "matchEnd", message: s.result });
+      }
+      remoteFrame = null;
+    }
+    if ((!paused || network) && s.phase !== "finished") {
       acc += elapsed;
       while (acc >= DT) {
         if (round !== s.round) {
@@ -561,14 +624,28 @@ export async function createGame(
           pitch = 0;
           round = s.round;
         }
-        const c = command();
-        s.step(opts.botsOnly ? {} : { 0: c });
+        const c = paused ? idle(yaw, pitch) : command();
+        if (!network) s.step(opts.botsOnly ? {} : { 0: c });
+        else if (host) {
+          const peer = s.players[peerPlayer];
+          const recent = now - remoteAt < 250;
+          const remote = recent && remoteCommand ? remoteCommand : idle(peer.yaw, peer.pitch);
+          s.step({ 0: c, [peerPlayer]: { ...remote, buy: remoteBuy, slot: remoteSlot } });
+          remoteBuy = undefined;
+          remoteSlot = undefined;
+        } else network.send({ type: "input", sequence: ++inputTick, stream: inputStream, command: c });
         acc -= DT;
         if (bar.mode === "Buy menu" && !s.canBuy(s.me)) {
           bar.close();
           bar.note("Buy period ended. Click to capture mouse.");
         }
       }
+    }
+    if (host && (s.tick - lastSentFrame >= 4 ||
+      (s.phase === "finished" && (lastSentFrame !== s.tick || now - lastSentAt >= 1000)))) {
+      network?.send({ type: "frame", frame: projectFrame(s) });
+      lastSentFrame = s.tick;
+      lastSentAt = now;
     }
     const me = s.me;
     const watched = me.alive
@@ -627,7 +704,7 @@ export async function createGame(
           : 0,
       alpha,
       bomb: s.bomb,
-      grenades: s.grenades.map((g) => ({
+      grenades: network && !host ? remoteGrenades : s.grenades.map((g) => ({
         ...g.body.translation(),
         type: g.type,
         id: g.id,
