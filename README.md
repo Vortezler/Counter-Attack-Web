@@ -2,7 +2,7 @@
 
 **CS Web (fan project)**
 
-A browser FPS for desktop keyboard and mouse, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, Competitive (friendly fire) or Casual (free armor, CT defuse kits, no friendly fire), pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
+A browser FPS for desktop keyboard and mouse, also packaged as an Android app with touch controls, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, Competitive (friendly fire) or Casual (free armor, CT defuse kits, no friendly fire), pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
 ## Play locally
 
@@ -48,9 +48,37 @@ Open the buy menu in your spawn during the 15-second freeze or the first 20 seco
 | `node scripts/capture.mjs` | With `npm run dev` running, re-renders lobby art for Nuke, Inferno and Vertigo |
 | `npm run map:svg -- mirage` | Regenerate a map schematic under `docs/maps` |
 | `npm run test:soak` | Deterministic ten-bot matches on both maps with objective and tick statistics |
-| `npm run build && npm run test:browser` | Match setup, buying, shooting, reloading, scoreboard, pause, and repeated WebGL teardown |
+| `npm run build && npm run test:browser` | Match setup, buying, shooting, reloading, scoreboard, pause, repeated WebGL teardown, and phone-browser touch controls |
+| `npm run test:android` | With the debug app open on an emulator or phone, 33 multi-touch checks of the Android build |
 
 The browser checks use Edge on Windows. On other platforms install the Playwright Chromium browser with `npx playwright install chromium`, or select an installed channel with `CS_WEB_BROWSER_CHANNEL`.
+
+## Android app
+
+`android/` is a [Capacitor](https://capacitorjs.com/) project that ships the same TypeScript, Three.js and Rapier game in an Android WebView. It runs landscape only, full screen with the system bars hidden, keeps the screen awake, and keeps the HUD clear of camera cutouts. It needs the Android SDK (API 36) and JDK 21; Android Studio's bundled `jbr` works.
+
+```sh
+npm run build:android                    # type-check, bundle into dist-android/, copy into android/
+cd android && ./gradlew assembleDebug    # writes app/build/outputs/apk/debug/app-debug.apk
+```
+
+Or open `android/` in Android Studio, or run `npm run android` to build and launch on a connected phone or emulator.
+
+Touch controls are invisible during play. At the start of each match a very faint outline shows where they are, and it fades when the first round goes live. **Show touch layout** in the in-game settings brings it back for a few seconds, and the lobby's Controls dialog has a diagram.
+
+| Touch | Action |
+| --- | --- |
+| Left side: put a thumb down and drag | Move with a floating stick; a light push walks |
+| Right side: drag | Aim |
+| Fire, around the right thumb | Hold to fire; keep dragging on it to aim while firing |
+| Scope, Reload, Use, Jump, Swap, Crouch | Buttons around Fire. Crouch toggles; Swap returns to the last weapon |
+| Radar | Buy menu |
+| Score at the top | Hold for the scoreboard |
+| Inventory row | Draw that weapon or grenade |
+| Objective prompt | Hold to plant or defuse |
+| Top-right corner, or Back | Pause; Back also resumes and closes menus |
+
+Phone browsers get the same controls and ask for landscape. `npm run test:android` drives the installed debug app through the WebView's DevTools socket, and `npm run android:icons` regenerates the launcher icons and splash images from `public/mark.svg`.
 
 ## GitHub Pages
 
@@ -64,7 +92,7 @@ Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, a
 
 The match opens inside the Game Hub tab. Browsers share connection candidates while establishing direct WebRTC and use private Game Hub Realtime messages if a direct path is unavailable. On the relay, the guest sees local movement immediately and adjusts to the host's snapshots. The host resolves damage, purchases, and round outcomes over either connection. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
 
-On a touch device, use the on-screen buttons to move and act and drag the view to aim. Keep the host tab active on mobile because the browser can suspend it in the background. The host controls this casual match, so play with someone you trust.
+On a phone, use the touch controls described under [Android app](#android-app). Keep the host tab active on mobile because the browser can suspend it in the background. The host controls this casual match, so play with someone you trust.
 
 
 The standalone build works with no backend configuration. For guest restoration, copy `.env.example` to `.env.local` and set the same browser-safe Supabase URL and publishable key as Game Hub. Serve the two applications on the same origin for shared guest storage. The game stores local preferences under `cs-web:` and signs in no new users.

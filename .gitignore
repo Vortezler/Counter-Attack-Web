@@ -5,3 +5,6 @@ dist/
 test-results/
 playwright-report/
 .qa/
+
+# Android (Capacitor) web bundle; the native project lives in android/
+dist-android/

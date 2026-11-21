@@ -16,18 +16,26 @@
     "map:svg": "tsx scripts/maps.ts svg",
     "test:soak": "tsx scripts/soak.ts",
     "test:browser": "playwright test",
-    "check:performance": "node scripts/benchmark.mjs"
+    "check:performance": "node scripts/benchmark.mjs",
+    "build:android": "tsc --noEmit && vite build --mode android --outDir dist-android && cap sync android",
+    "android": "npm run build:android && cap run android",
+    "test:android": "node scripts/android-e2e.mjs",
+    "android:icons": "node scripts/android-icons.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
     "@dimforge/rapier3d-compat": "0.21.0",
     "@supabase/supabase-js": "2.119.0",
     "three": "0.187.0"
   },
   "devDependencies": {
-    "eslint": "10.15.0",
-    "prettier": "3.10.1",
+    "@capacitor/cli": "8.6.2",
     "@playwright/test": "1.65.1",
     "@types/three": "0.187.0",
+    "eslint": "10.15.0",
+    "prettier": "3.10.1",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.8",

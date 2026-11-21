@@ -1942,13 +1942,17 @@ export class GameRenderer {
   constructor(
     public canvas: HTMLCanvasElement,
     public map: MapDef,
+    /** "low" trades resolution and shadow detail for frame rate on phones. */
+    quality: "high" | "low" = "high",
   ) {
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
       powerPreference: "high-performance",
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio || 1, quality === "low" ? 1.15 : 1.6),
+    );
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
@@ -1965,7 +1969,8 @@ export class GameRenderer {
     this.sun.position.set(map.width * 0.5 - 42, 65, map.depth * 0.5 - 30);
     this.sun.target.position.set(map.width * 0.5, 0, map.depth * 0.5);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    const shadowSize = quality === "low" ? 1024 : 2048;
+    this.sun.shadow.mapSize.set(shadowSize, shadowSize);
     const shadow = this.sun.shadow.camera,
       size = Math.max(map.width, map.depth) * 0.66;
     shadow.left = -size;

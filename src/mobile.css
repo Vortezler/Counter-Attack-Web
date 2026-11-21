@@ -1,0 +1,436 @@
+/* Phones and tablets: touch controls, the landscape HUD and the compact lobby.
+   html[data-input="touch"] is set by markPlatform(); .csw-native marks the Android app. */
+
+:root {
+  /* Camera cutouts and rounded corners. The Android app also publishes --cutout-* because
+     older WebViews report zero for env(safe-area-inset-*). */
+  --csw-safe-t: max(env(safe-area-inset-top, 0px), var(--cutout-top, 0px));
+  --csw-safe-r: max(env(safe-area-inset-right, 0px), var(--cutout-right, 0px));
+  --csw-safe-b: max(env(safe-area-inset-bottom, 0px), var(--cutout-bottom, 0px));
+  --csw-safe-l: max(env(safe-area-inset-left, 0px), var(--cutout-left, 0px));
+}
+.csw-native [data-hub],
+.csw-native [data-action="exit"] {
+  display: none !important;
+}
+[data-input="touch"] body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+/* No double-tap zoom: it delays each tap's click and swallows a quick second tap,
+   which loses purchases when buying two items in a row. */
+[data-input="touch"] .csw-lobby,
+[data-input="touch"] .csw-panel,
+[data-input="touch"] .csw-panel * {
+  touch-action: manipulation;
+}
+
+/* ---- Touch layer ------------------------------------------------------------ */
+.csw-touch-game {
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* Covers the view below the HUD, so HUD menus stay tappable. Nothing in it is visible in play. */
+.csw-touch {
+  position: absolute;
+  inset: 0;
+  padding: var(--csw-safe-t) var(--csw-safe-r) var(--csw-safe-b) var(--csw-safe-l);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.csw-touch-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1.6s ease;
+}
+/* Very translucent: a reminder of where things are, never in the way of the view. */
+.csw-touch-reveal .csw-touch-guide {
+  opacity: 0.3;
+  transition-duration: 0.4s;
+}
+.csw-touch-btn,
+.csw-touch-stick,
+.csw-touch-look,
+.csw-touch-hint {
+  position: absolute;
+  color: #f4f8ea;
+  font: 700 11px/1 Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px #000;
+}
+.csw-touch-btn {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px solid #f4f8ea;
+  background: #f4f8ea1f;
+}
+.csw-touch-fire {
+  border-color: #ffb07c;
+  background: #ff8b4a33;
+  font-size: 13px;
+}
+/* Two bars drawn in CSS: Android has no font glyph for a pause symbol. */
+.csw-touch-pause::before {
+  content: "";
+  width: 28%;
+  height: 36%;
+  background: linear-gradient(90deg, #f4f8ea 0 34%, transparent 34% 66%, #f4f8ea 66%);
+}
+.csw-touch-stick {
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 2px dashed #f4f8ea;
+}
+.csw-touch-stick i {
+  position: absolute;
+  inset: 32%;
+  border-radius: 50%;
+  background: #f4f8ea38;
+  border: 2px solid #f4f8ea;
+}
+.csw-touch-stick span {
+  position: absolute;
+  top: calc(100% + 6px);
+}
+.csw-touch-look {
+  padding: 8px 14px;
+  border: 1px dashed #f4f8ea;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.csw-touch-look::before,
+.csw-touch-look::after {
+  content: "\2190  ";
+}
+.csw-touch-look::after {
+  content: "  \2192";
+}
+.csw-touch-hint {
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  background: #0b0f0c;
+  white-space: nowrap;
+}
+
+/* The same drawing in the lobby's Controls dialog, always visible. */
+.csw-touch-diagram {
+  position: relative;
+  aspect-ratio: 866 / 400;
+  margin-bottom: 14px;
+  border: 1px solid #4a5346;
+  background: linear-gradient(160deg, #2a3128, #171b17);
+  overflow: hidden;
+}
+.csw-touch-diagram > * {
+  font-size: clamp(5px, 0.8vw, 9px);
+  letter-spacing: 0;
+}
+.csw-touch-diagram .csw-touch-look {
+  padding: 4px 8px;
+}
+.csw-touchguide {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.csw-touchguide div {
+  display: grid;
+  grid-template-columns: 8.5em 1fr;
+  gap: 12px;
+}
+.csw-touchguide dt {
+  color: #c5f16a;
+  font-weight: 700;
+}
+.csw-touchguide dd {
+  margin: 0;
+  color: #cdd1c7;
+}
+
+/* ---- Phone HUD ---------------------------------------------------------------
+   The left thumb owns the lower left, the right thumb the lower right. Readouts that
+   double as controls (radar = buy, score = scoreboard, inventory = weapons) sit
+   where a thumb can reach them without crossing the view. */
+/* The HUD box stays full screen so the crosshair and scope mark the true view centre;
+   only readouts anchored to an edge step in from cutouts. */
+.csw-touch-game .csw-hud .csw-panel {
+  z-index: 5;
+}
+.csw-touch-game .csw-intel {
+  top: calc(var(--csw-safe-t) + 6px);
+  left: calc(var(--csw-safe-l) + 6px);
+  width: 9.5em;
+}
+.csw-touch-game .csw-radar-top {
+  display: none;
+}
+.csw-touch-game .csw-intel strong {
+  margin-top: 3px;
+}
+.csw-touch-game .csw-strip {
+  top: calc(var(--csw-safe-t) + 6px);
+}
+/* Clear of the pause corner. */
+.csw-touch-game .csw-killfeed {
+  top: calc(var(--csw-safe-t) + 6px);
+  right: calc(var(--csw-safe-r) + 62px);
+  max-width: 34vw;
+}
+.csw-touch-game .csw-vitals,
+.csw-touch-game .csw-ammo {
+  bottom: calc(var(--csw-safe-b) + 6px);
+  padding: 5px 11px;
+  gap: 11px;
+}
+.csw-touch-game .csw-vitals {
+  left: calc(var(--csw-safe-l) + 6px);
+}
+.csw-touch-game .csw-debug {
+  left: calc(var(--csw-safe-l) + 6px);
+}
+.csw-touch-game .csw-ammo {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+  flex-wrap: nowrap;
+  align-items: baseline;
+}
+.csw-touch-game .csw-ammo small {
+  width: auto;
+  order: 3;
+}
+/* A row of weapon chips above the ammo readout; tap one to draw it. */
+.csw-touch-game .csw-inventory {
+  right: auto;
+  left: 50%;
+  bottom: calc(var(--csw-safe-b) + 6px + 3.4em);
+  transform: translateX(-50%);
+  max-width: 30vw;
+  flex-direction: row;
+  flex-wrap: wrap-reverse;
+  justify-content: center;
+  font-size: 0.95em;
+  gap: 4px;
+}
+.csw-touch-game .csw-inventory li {
+  min-width: 0;
+  padding: 5px 9px;
+  border-right: 0;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.csw-touch-game .csw-inventory li.on {
+  border-bottom-color: #c8f07a;
+}
+.csw-touch-game .csw-inventory li:not([data-slot]) {
+  opacity: 0.7;
+}
+.csw-touch-game .csw-inventory kbd,
+.csw-touch-game .csw-inventory b {
+  display: none;
+}
+.csw-touch-game .csw-center-msg {
+  top: 15%;
+}
+/* The plant / defuse prompt is a button on touch: hold it. */
+.csw-touch-game .csw-center-msg span[data-hold] {
+  padding: 12px 20px;
+  border: 1px solid #c8f07a;
+  font-size: 1.15em;
+}
+
+/* Menus inside a match: fit a phone held sideways. */
+.csw-touch-game .csw-panel {
+  padding: 6px max(6px, var(--csw-safe-r)) 6px max(6px, var(--csw-safe-l));
+}
+.csw-touch-game .csw-panel section {
+  width: min(780px, 100%);
+  max-height: 100%;
+  padding: 12px 16px;
+  font-size: 14px;
+}
+.csw-touch-game .csw-panel header {
+  margin-bottom: 8px;
+}
+.csw-touch-game .csw-panel h2 {
+  font-size: 24px;
+  margin: 2px 0;
+}
+.csw-touch-game .csw-panel button {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+.csw-touch-game .csw-panel nav {
+  grid-template-columns: repeat(4, 1fr);
+  padding-bottom: 8px;
+  gap: 5px;
+}
+.csw-touch-game .csw-shop-list {
+  grid-template-columns: repeat(2, 1fr);
+}
+.csw-touch-game .csw-panel p {
+  margin: 6px 0;
+}
+.csw-touch-game .csw-panel [data-teams] {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.csw-touch-game .csw-panel table {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.csw-touch-game .csw-controls input[type="range"] {
+  min-height: 32px;
+}
+
+/* ---- Lobby on a phone held sideways --------------------------------------------
+   One screen, no page scroll: map preview and picker on the left, setup on the right
+   with Start always in view. */
+@media (max-height: 560px) and (orientation: landscape) {
+  [data-input="touch"] .csw-lobby {
+    height: 100dvh;
+    overflow: hidden;
+    padding: 0 var(--csw-safe-r) var(--csw-safe-b) var(--csw-safe-l);
+  }
+  [data-input="touch"] .csw-topinner,
+  [data-input="touch"] .csw-lobbybody {
+    padding-inline: 14px;
+  }
+  [data-input="touch"] .csw-topinner {
+    min-height: 46px;
+    gap: 22px;
+    flex-wrap: nowrap;
+  }
+  [data-input="touch"] .csw-brand .csw-mark {
+    width: 28px;
+    height: 28px;
+  }
+  [data-input="touch"] .csw-brand strong {
+    font-size: 20px;
+  }
+  [data-input="touch"] .csw-brand small {
+    display: none;
+  }
+  [data-input="touch"] .csw-topnav {
+    gap: 18px;
+  }
+  [data-input="touch"] .csw-topnav button {
+    font-size: 14px;
+    min-height: 44px;
+  }
+  [data-input="touch"] .csw-headingrow,
+  [data-input="touch"] .csw-lobbyfooter,
+  [data-input="touch"] .csw-start kbd,
+  [data-input="touch"] .csw-previewtag,
+  [data-input="touch"] .csw-poollabel,
+  [data-input="touch"] .csw-frame {
+    display: none;
+  }
+  [data-input="touch"] .csw-lobbybody {
+    flex: 1;
+    min-height: 0;
+    padding-block: 10px;
+  }
+  [data-input="touch"] .csw-lobbygrid {
+    flex: 1;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+    gap: 12px;
+  }
+  [data-input="touch"] .csw-mapcolumn {
+    min-height: 0;
+    gap: 8px;
+  }
+  [data-input="touch"] .csw-feature {
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+  [data-input="touch"] .csw-featuretext {
+    left: 14px;
+    bottom: 10px;
+  }
+  [data-input="touch"] .csw-featuretext h2 {
+    font-size: 40px;
+  }
+  [data-input="touch"] .csw-featuretext p {
+    display: none;
+  }
+  [data-input="touch"] .csw-mapgrid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  [data-input="touch"] .csw-lobby .csw-mapcard {
+    height: 50px;
+  }
+  [data-input="touch"] .csw-mapcardname {
+    font-size: 15px;
+  }
+  [data-input="touch"] .csw-mapindex {
+    display: none;
+  }
+  [data-input="touch"] .csw-setup {
+    min-height: 0;
+  }
+  [data-input="touch"] .csw-setuphead {
+    display: none;
+  }
+  [data-input="touch"] .csw-setupbody {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 10px 12px 0;
+    gap: 9px;
+    justify-content: flex-start;
+  }
+  [data-input="touch"] .csw-modeline {
+    display: none;
+  }
+  [data-input="touch"] .csw-setup legend,
+  [data-input="touch"] .csw-namelabel {
+    margin-bottom: 4px;
+  }
+  [data-input="touch"] .csw-teamgrid button {
+    min-height: 46px;
+    padding: 3px;
+  }
+  [data-input="touch"] .csw-insignia {
+    height: 24px;
+  }
+  /* Start stays pinned to the bottom of the setup column while the options scroll. */
+  [data-input="touch"] .csw-start {
+    position: sticky;
+    bottom: 0;
+    margin-top: auto;
+    min-height: 48px;
+    box-shadow: 0 -10px 14px #191c19;
+  }
+  [data-input="touch"] .csw-menudialog section {
+    max-height: calc(100dvh - 16px);
+  }
+}
+
+/* Portrait phones in a browser: ask for landscape instead of squeezing the match. */
+@media (orientation: portrait) {
+  [data-input="touch"] .csw-game::after {
+    content: "Rotate your phone to landscape to play";
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    text-align: center;
+    color: #f3f6e9;
+    background: #111411f5;
+    font: 700 20px Arial, sans-serif;
+  }
+}

@@ -13,7 +13,7 @@ function weapon(value: unknown): value is Weapon {
 }
 
 const phases = ["warmup", "freeze", "live", "planted", "ended", "finished"];
-const slots = [0, 1, 2, 3, 4, 5, -1, 9, -9];
+const slots = [0, 1, 2, 3, 4, 5, -1, 9, -9, 11, 12, 13, 14];
 type Payload = Record<string, unknown>;
 
 export function record(value: unknown): value is Payload {

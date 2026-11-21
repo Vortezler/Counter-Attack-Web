@@ -1,6 +1,8 @@
 import "./menu.css";
 import type { GridMapId } from "./world";
 import { mountBindEditor } from "./keybinds";
+import { nativeApp, touchDevice } from "./platform";
+import { controlsDiagram } from "./touch-controls";
 
 export type LobbyMap = GridMapId;
 export const lobbyMaps: LobbyMap[] = [
@@ -46,7 +48,8 @@ export const defaultMenuSettings: MenuSettings = {
   sensitivity: 1.5,
   volume: 0.65,
   fov: 90,
-  shadows: true,
+  // Phone GPUs keep a steadier frame rate without the shadow pass.
+  shadows: !touchDevice,
   fullscreen: true,
   crosshair: "classic",
   hudScale: 1,
@@ -156,7 +159,7 @@ export function mergeSettings(
     sensitivity: validNumber(s.sensitivity, 1.5, 0.25, 5),
     volume: validNumber(s.volume, 0.65, 0, 1),
     fov: validNumber(s.fov, 90, 65, 120),
-    shadows: typeof s.shadows === "boolean" ? s.shadows : true,
+    shadows: typeof s.shadows === "boolean" ? s.shadows : !touchDevice,
     fullscreen: typeof s.fullscreen === "boolean" ? s.fullscreen : true,
     crosshair: s.crosshair === "dot" ? "dot" : "classic",
     hudScale: validNumber(s.hudScale, 1, 0.75, 1.5),
@@ -164,6 +167,17 @@ export function mergeSettings(
 }
 const art = (map: LobbyMap, thumb = false) =>
   `${import.meta.env.BASE_URL}art/${map}${thumb ? "-map" : ""}.${map === "dust2" || map === "mirage" ? "webp" : "jpg"}`;
+/** The Controls dialog on phones: where the invisible touch controls are. */
+const touchGuide = `<dl class="csw-touchguide">
+  <div><dt>Move</dt><dd>Put your left thumb down anywhere on the left side and drag. A light push walks quietly.</dd></div>
+  <div><dt>Aim</dt><dd>Drag anywhere on the right side. Keep dragging on Fire to aim while you shoot.</dd></div>
+  <div><dt>Buttons</dt><dd>Fire, Scope, Reload, Use, Jump, Swap and Crouch sit around your right thumb. They are invisible in play and shown faintly at the start of each match.</dd></div>
+  <div><dt>Buy</dt><dd>Tap the radar during the buy period.</dd></div>
+  <div><dt>Weapons</dt><dd>Tap an item in the inventory row at the bottom. Swap returns to your last weapon.</dd></div>
+  <div><dt>Plant / defuse</dt><dd>Hold the prompt in the middle of the screen, or hold Use.</dd></div>
+  <div><dt>Scoreboard</dt><dd>Hold the score at the top.</dd></div>
+  <div><dt>Pause</dt><dd>Tap the top-right corner${nativeApp ? " or press Back" : ""}.</dd></div>
+</dl>`;
 export function mountMenu(container: HTMLElement, options: MenuOptions) {
   const controller = new AbortController();
   const { signal } = controller;
@@ -210,7 +224,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
         <label class="csw-namelabel" for="csw-lobby-name">Player name</label><div class="csw-inputwrap">${icon("person")}<input id="csw-lobby-name" name="playerName" autocomplete="off" maxlength="48" required spellcheck="false" placeholder="Operator"></div>
         <button type="submit" class="csw-start"><span>${icon("play")}Start match</span><kbd>ENTER</kbd></button>
       </div></form>
-    </div><footer class="csw-lobbyfooter"><span>${icon("monitor")} Desktop <b>/</b> Keyboard + mouse</span><span>${icon("network")}64 tick</span></footer>
+    </div><footer class="csw-lobbyfooter"><span>${icon("monitor")} ${touchDevice ? "Mobile <b>/</b> Touch controls" : "Desktop <b>/</b> Keyboard + mouse"}</span><span>${icon("network")}64 tick</span></footer>
   </div><dialog class="csw-menudialog"><section><header><h2></h2><button type="button" data-dismiss aria-label="Close dialog">${icon("close")}</button></header><div class="csw-dialogbody"></div></section></dialog>`;
   container.append(menu);
   const get = <T extends Element = HTMLElement>(s: string) =>
@@ -285,7 +299,10 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     const body = get(".csw-dialogbody");
     get("dialog h2").textContent =
       kind === "controls" ? "Controls" : "Settings";
-    if (kind === "controls") {
+    if (kind === "controls" && touchDevice) {
+      body.innerHTML = touchGuide;
+      body.prepend(controlsDiagram());
+    } else if (kind === "controls") {
       body.innerHTML = "";
       const cleanup = mountBindEditor(body);
       dialogListeners.signal.addEventListener("abort", cleanup);
@@ -300,13 +317,13 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       ) =>
         `<label class="csw-setting"><span>${label}<output data-value="${key}"></output></span><input type="range" data-setting="${key}" min="${min}" max="${max}" step="${step}" value="${s[key]}"></label>`;
       body.innerHTML =
-        slider("sensitivity", "Mouse sensitivity", 0.25, 5, 0.05) +
+        slider("sensitivity", touchDevice ? "Look sensitivity" : "Mouse sensitivity", 0.25, 5, 0.05) +
         slider("volume", "Master volume", 0, 1, 0.01) +
         slider("fov", "Field of view", 65, 120, 1) +
         slider("hudScale", "HUD scale", 0.75, 1.5, 0.05) +
         `<label class="csw-settingrow">Crosshair<select data-setting="crosshair"><option value="classic">Classic</option><option value="dot">Dot</option></select></label>
         <label class="csw-settingrow">Map shadows<input data-setting="shadows" type="checkbox" ${s.shadows ? "checked" : ""}></label>
-        <label class="csw-settingrow">Play in fullscreen (Esc returns to the browser)<input data-setting="fullscreen" type="checkbox" ${s.fullscreen ? "checked" : ""}></label>`;
+        ${nativeApp ? "" : `<label class="csw-settingrow">Play in fullscreen${touchDevice ? "" : " (Esc returns to the browser)"}<input data-setting="fullscreen" type="checkbox" ${s.fullscreen ? "checked" : ""}></label>`}`;
       get<HTMLSelectElement>("[data-setting=crosshair]").value = s.crosshair;
       const values = () => {
         get("[data-value=sensitivity]").textContent = s.sensitivity.toFixed(2);

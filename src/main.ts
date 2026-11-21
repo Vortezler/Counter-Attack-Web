@@ -4,6 +4,8 @@ import { createGame } from "./index";
 import { consumeRoomRequest } from "./hub/navigation";
 import { restorePlayerName } from "./hub/supabase";
 import { lobbyMaps, type LobbyMap } from "./menu";
+import { markPlatform, nativeApp } from "./platform";
+markPlatform();
 async function openPeerMatch(launch: Promise<PeerMatch>) {
   const root = document.getElementById("app")!;
   const panel = document.createElement("section");
@@ -79,6 +81,10 @@ async function openSolo() {
     debug: q.get("debug") === "1",
     fly: q.get("fly") === "1",
     botsOnly: q.get("botsonly") === "1",
+    // The Android app has no Game Hub to return to; leaving closes the app.
+    onExit: nativeApp
+      ? () => void import("@capacitor/app").then(({ App }) => App.exitApp())
+      : undefined,
     autostart:
       q.get("autostart") === "1" ||
       q.get("scene") === "range" ||

@@ -1,4 +1,5 @@
 import "./game.css";
+import "./mobile.css";
 import {
   mergeSettings,
   mountMenu,
@@ -12,7 +13,8 @@ import type { Sim, SimEvent } from "./sim/Sim";
 import { idle, type PlayerCommand } from "./sim/player";
 import { applyFrame, peerPlayer, projectFrame, readCommand, readEvent, record } from "./sim/peer-state";
 import { GuestMotion } from "./sim/guest-motion";
-import { mountTouchControls } from "./touch-controls";
+import { mountTouchControls, type TouchControls } from "./touch-controls";
+import { compactScreen, nativeApp, onBackButton, touchDevice } from "./platform";
 import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
@@ -21,7 +23,6 @@ import { catalog, isGun } from "./config/weapons";
 import {
   actionFor,
   binds,
-  defaultBinds,
   isBound,
   lockedKeys,
   type Action,
@@ -30,12 +31,6 @@ import {
 type KeyboardLock = { lock(codes?: string[]): Promise<void>; unlock(): void };
 const keyboard = () =>
   (navigator as Navigator & { keyboard?: KeyboardLock }).keyboard;
-const touchAction = (key: string): Action | undefined =>
-  key === "fire" || key === "alt"
-    ? key
-    : (Object.keys(defaultBinds) as Action[]).find((a) =>
-        defaultBinds[a].includes(key),
-      );
 const slots: Partial<Record<Action, number>> = {
   primary: 1,
   pistol: 2,
@@ -119,7 +114,12 @@ export async function createGame(
   const fly = !!opts.fly;
   const network = opts.peer;
   const host = !!network?.launch.host;
-  const touch = !!network && matchMedia("(pointer: coarse)").matches;
+  // Phones and tablets get touch controls in every mode, not only peer matches.
+  const touch = touchDevice;
+  /** Direction from the touch stick (unit length, or zero) and whether it is only lightly pushed. */
+  let stick = { x: 0, z: 0, walk: false };
+  let touchUi: TouchControls | null = null,
+    revealedAt = 0;
   let remoteCommand: PlayerCommand | null = null;
   let remoteAt = 0;
   let remoteBuy: string | undefined;
@@ -167,12 +167,15 @@ export async function createGame(
     presses.clear();
     touchHeld.clear();
     touchTapped.clear();
+    stick = { x: 0, z: 0, walk: false };
+    touchUi?.reset();
     slot = 0;
   }
   const fullscreen = () => !!document.fullscreenElement;
   /** Fullscreen plus a keyboard lock so browser shortcuts reach the game; Esc stays with the browser. */
   function enterFullscreen() {
-    if (!choice.settings.fullscreen) return;
+    // The Android app already runs full screen with the system bars hidden.
+    if (!choice.settings.fullscreen || nativeApp) return;
     wantFullscreen = true;
     const lockKeys = () => {
       if (fullscreen())
@@ -187,6 +190,15 @@ export async function createGame(
         .then(() => {
           lockKeys();
           lock();
+          // Phones play sideways; Android honours this in fullscreen, iOS ignores it.
+          if (touch)
+            void (
+              screen.orientation as ScreenOrientation & {
+                lock?: (o: string) => Promise<void>;
+              }
+            )
+              ?.lock?.("landscape")
+              .catch(() => {});
         })
         .catch(() => {});
     } catch {
@@ -210,6 +222,7 @@ export async function createGame(
     raf = 0;
     roundListeners?.abort();
     roundListeners = null;
+    touchUi = null;
     menu?.destroy();
     menu = null;
     release();
@@ -249,7 +262,9 @@ export async function createGame(
     audio.volume = value.volume;
     writeSetting("settings", value);
     if (hud) {
-      hud.root.style.fontSize = 16 * value.hudScale + "px";
+      // Phones in landscape are short, so the HUD shrinks with the screen.
+      hud.root.style.fontSize =
+        16 * value.hudScale * (compactScreen() ? 0.72 : 1) + "px";
       hud.root.classList.toggle("dot", value.crosshair === "dot");
     }
   }
@@ -409,7 +424,7 @@ export async function createGame(
         sim.players[0].name = network.launch.hostName;
         sim.players[peerPlayer].name = network.launch.peerName;
       }
-      renderer = new engine.GameRenderer(canvas!, map);
+      renderer = new engine.GameRenderer(canvas!, map, touch ? "low" : "high");
       hud = new overlay.MatchHud(
         stage!,
         sim,
@@ -425,9 +440,15 @@ export async function createGame(
           } : undefined,
           exit,
           settings: config,
+          guide: () => {
+            resume();
+            touchUi?.reveal();
+            revealedAt = performance.now();
+          },
         },
         opts.debug,
       );
+      hud.touch = touch;
       sim.onEvent(event => {
         ingest(event);
         if (host && event.type !== "trace" && event.type !== "matchEnd") {
@@ -438,6 +459,29 @@ export async function createGame(
       });
       status.remove();
       settings(c.settings);
+      // ?debug=1 exposes a read-only snapshot for the device test scripts.
+      if (opts.debug)
+        (globalThis as { cswProbe?: () => unknown }).cswProbe = () => {
+          const me = sim?.me;
+          return me && {
+            phase: sim!.phase,
+            x: me.x,
+            y: me.y,
+            z: me.z,
+            yaw,
+            pitch,
+            weapon: me.weapon,
+            ammo: me.mag?.ammo,
+            scoped: me.scoped,
+            reloading: !!me.reloadEnd,
+            crouched: me.crouched,
+            command: me.lastCmd,
+            stick,
+            mode: hud?.mode ?? "",
+            paused,
+            guide: !!touchUi?.revealed,
+          };
+        };
       yaw = sim.me.yaw;
       pitch = 0;
       flyPos = { ...sim.me.eye };
@@ -508,28 +552,39 @@ export async function createGame(
       surface = canvas!;
     if (touch) {
       stage!.classList.add("csw-touch-game");
-      mountTouchControls(stage!, surface, {
-        hold(key, down) {
-          if (down && (paused || bar.mode)) return;
-          // Touch buttons name a default key; resolve it to an action so rebinding never moves them.
-          const action = touchAction(key);
-          if (!action) return;
-          if (action === "previous") {
-            if (down) slot = -1;
-          } else if (down) {
+      const blocked = () => paused || !!bar.mode;
+      touchUi = mountTouchControls(stage!, bar.root, {
+        move(x, z, walk) {
+          stick = blocked() ? { x: 0, z: 0, walk: false } : { x, z, walk };
+        },
+        hold(action, down) {
+          if (down && blocked()) return;
+          if (down) {
             touchHeld.add(action);
             touchTapped.add(action);
           } else touchHeld.delete(action);
         },
         look(dx, dy) {
-          if (paused || bar.mode) return;
-          audio.unlock();
-          yaw += dx * 0.006;
-          pitch = Math.max(-1.55, Math.min(1.55, pitch - dy * 0.006));
+          if (paused || (bar.mode && bar.mode !== "Scoreboard")) return;
+          // Sensitivity 1.5 (the default) turns 0.006 rad per CSS pixel of drag.
+          const k = 0.004 * choice.settings.sensitivity * zoomScale(s.me.scoped);
+          yaw += dx * k;
+          pitch = Math.max(-1.55, Math.min(1.55, pitch - dy * k));
+        },
+        slot(n) {
+          if (!blocked()) slot = n;
+        },
+        scoreboard(open) {
+          if (open && !bar.mode) bar.scoreboard();
+          else if (!open && bar.mode === "Scoreboard") bar.close();
         },
         buy: buyMenu,
         pause,
+        touched: () => audio.unlock(),
       }, ctrl.signal);
+      // A new match outlines the invisible controls very faintly until the first round goes live.
+      touchUi.reveal();
+      revealedAt = performance.now();
     }
     stage!.addEventListener(
       "click",
@@ -608,13 +663,9 @@ export async function createGame(
           !paused &&
           (!bar.mode || bar.mode === "Scoreboard")
         ) {
-          const zoom = s.me.scoped;
           const factor =
             ((choice.settings.sensitivity * 0.022 * Math.PI) / 180) *
-            (zoom
-              ? Math.tan(((zoom === 1 ? 40 : 10) * Math.PI) / 360) /
-                Math.tan((choice.settings.fov * Math.PI) / 360)
-              : 1);
+            zoomScale(s.me.scoped);
           yaw += e.movementX * factor;
           pitch = Math.max(-1.55, Math.min(1.55, pitch - e.movementY * factor));
         }
@@ -717,6 +768,13 @@ export async function createGame(
       opt,
     );
   }
+  /** Slows aiming in proportion to the scope's narrower field of view. */
+  function zoomScale(zoom: number) {
+    return zoom
+      ? Math.tan(((zoom === 1 ? 40 : 10) * Math.PI) / 360) /
+          Math.tan((choice.settings.fov * Math.PI) / 360)
+      : 1;
+  }
   function command(): PlayerCommand {
     const held = (a: Action) =>
         touchHeld.has(a) || binds[a].some((c) => keys.has(c)),
@@ -724,8 +782,10 @@ export async function createGame(
         held(a) ||
         touchTapped.has(a) ||
         binds[a].some((c) => presses.has(c));
-    const x = Number(held("right")) - Number(held("left")),
-      z = Number(held("forward")) - Number(held("back"));
+    // The stick steers by direction at full speed; a light push walks quietly like Shift.
+    const steering = stick.x !== 0 || stick.z !== 0;
+    const x = steering ? stick.x : Number(held("right")) - Number(held("left")),
+      z = steering ? stick.z : Number(held("forward")) - Number(held("back"));
     const cmd = {
       moveX: fly ? 0 : x,
       moveZ: fly ? 0 : z,
@@ -734,7 +794,7 @@ export async function createGame(
       fire: tapped("fire"),
       alt: tapped("alt"),
       jump: tapped("jump"),
-      walk: held("walk"),
+      walk: held("walk") || (steering && stick.walk),
       crouch: held("crouch"),
       use: held("use"),
       reload: tapped("reload"),
@@ -910,9 +970,36 @@ export async function createGame(
     view.render(props);
     audio.updateListener(cam, cam.yaw, cam.pitch);
     bar.update(watched, frameRate, touch || currentLock(), reduced.matches);
+    if (
+      touchUi?.revealed &&
+      now - revealedAt > 5000 &&
+      (s.phase !== "warmup" && s.phase !== "freeze" || now - revealedAt > 30000)
+    )
+      touchUi.hide();
     raf = requestAnimationFrame(frame);
   }
-  window.addEventListener("resize", () => renderer?.resize(), { signal });
+  onBackButton(() => {
+    const dialog = root.querySelector<HTMLDialogElement>("dialog[open]");
+    if (dialog) {
+      dialog.close();
+      return true;
+    }
+    if (!sim || !hud) return false;
+    if (sim.phase === "finished") menuScreen();
+    else if (hud.mode === "Scoreboard") hud.close();
+    else if (hud.mode === "Settings") hud.pause();
+    else if (paused || hud.mode) resume();
+    else pause();
+    return true;
+  }, signal);
+  window.addEventListener(
+    "resize",
+    () => {
+      renderer?.resize();
+      settings(choice.settings);
+    },
+    { signal },
+  );
   const handle = {
     destroy,
     pause,

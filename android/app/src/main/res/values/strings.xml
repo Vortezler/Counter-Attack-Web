@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Counter-Attack</string>
+    <string name="title_activity_main">Counter-Attack</string>
+    <string name="package_name">io.github.vortezler.counterattack</string>
+    <string name="custom_url_scheme">io.github.vortezler.counterattack</string>
+</resources>

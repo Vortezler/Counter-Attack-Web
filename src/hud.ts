@@ -12,6 +12,7 @@ import { patterns } from "./config/recoilPatterns";
 import type { Player } from "./sim/player";
 import { hubUrl } from "./hub/navigation";
 import { keyName, mountBindEditor, type Action } from "./keybinds";
+import { nativeApp } from "./platform";
 const money = (v: number) => "$" + v.toLocaleString("en-US");
 const clock = (v: number) => {
   const seconds = Math.ceil(Math.max(0, v));
@@ -48,6 +49,8 @@ export class MatchHud {
   popEnd = 0;
   unbind: (() => void) | null = null;
   lastInventory = "";
+  /** Set by the game for phones: prompts name on-screen buttons instead of keys. */
+  touch = false;
   abort = new AbortController();
   constructor(
     parent: HTMLElement,
@@ -60,6 +63,8 @@ export class MatchHud {
       exit: () => void;
       settings: () => void;
       buy?: (item: Item) => string;
+      /** Touch only: resume and briefly outline the invisible controls. */
+      guide?: () => void;
     },
     public debug = false,
   ) {
@@ -107,6 +112,7 @@ export class MatchHud {
         ?.focus();
     } else if (key === "return") h.resume();
     else if (key === "settings") h.settings();
+    else if (key === "guide") h.guide?.();
     else if (key === "restart") h.restart();
     else if (key === "lobby") h.lobby();
     else if (key === "exit") h.exit();
@@ -176,9 +182,11 @@ export class MatchHud {
           .join("") +
         '</div><p aria-live="polite">' +
         (message ||
-          "Number keys select a category. " +
-            keyName("buy") +
-            " closes the armory.") +
+          (this.touch
+            ? "Tap a category, then an item."
+            : "Number keys select a category. " +
+              keyName("buy") +
+              " closes the armory.")) +
         "</p>" +
         this.button("return", "Return to match", "csw-cta"),
     );
@@ -213,7 +221,7 @@ export class MatchHud {
             '<a data-action="exit" href="' +
             hubUrl() +
             '">Back to Game Hub</a>'
-          : "<small>Release Tab to close</small>"),
+          : "<small>" + (this.touch ? "Release to close" : "Release Tab to close") + "</small>"),
     );
     const tables = this.ids.panel.querySelector("[data-teams]")!;
     for (const team of ["CT", "T"] as const) {
@@ -261,21 +269,24 @@ export class MatchHud {
       "Settings",
       '<header><div><small>FIELD CONFIGURATION</small><h2>Settings & controls</h2></div></header><div class="csw-controls"><label>Volume <input name="volume" type="range" min="0" max="1" step=".01" value="' +
         volume +
-        '"></label><label>Sensitivity <input name="sensitivity" type="range" min=".2" max="5" step=".1" value="' +
+        '"></label><label>' + (this.touch ? "Look sensitivity" : "Sensitivity") + ' <input name="sensitivity" type="range" min=".2" max="5" step=".1" value="' +
         sensitivity +
         '"></label>' +
         check("shadows", "Shadows", shadows) +
-        check(
-          "fullscreen",
-          "Fullscreen (Esc returns to the browser)",
-          fullscreen,
-        ) +
-        "<h3>Key bindings</h3><div data-binds></div></div>" +
+        (nativeApp
+          ? ""
+          : check(
+              "fullscreen",
+              this.touch ? "Fullscreen" : "Fullscreen (Esc returns to the browser)",
+              fullscreen,
+            )) +
+        (this.touch
+          ? "</div>" + this.button("guide", "Show touch layout")
+          : "<h3>Key bindings</h3><div data-binds></div></div>") +
         this.button("return", "Resume match", "csw-cta"),
     );
-    this.unbind = mountBindEditor(
-      this.ids.panel.querySelector("[data-binds]")!,
-    );
+    const binds = this.ids.panel.querySelector<HTMLElement>("[data-binds]");
+    if (binds) this.unbind = mountBindEditor(binds);
     this.ids.panel
       .querySelectorAll<HTMLInputElement>(".csw-controls > label input")
       .forEach(
@@ -527,14 +538,21 @@ export class MatchHud {
           : s.work && s.worker === p.id
             ? s.action + "ing…"
             : objective
-              ? "Hold " + keyName("use") + " to " + objective.toLowerCase()
+              ? (this.touch ? "Hold here" : "Hold " + keyName("use")) + " to " + objective.toLowerCase()
               : s.canBuy(p)
-                ? keyName("buy") + "  /  Open buy menu"
+                ? this.touch
+                  ? "Tap the radar to buy"
+                  : keyName("buy") + "  /  Open buy menu"
                 : view.reloadEnd
                   ? "Reloading…"
                   : s.carrier === p.id
                     ? "Carrying C4"
                     : "",
+    );
+    // On touch the objective prompt is itself the plant / defuse button.
+    el.prompt.toggleAttribute(
+      "data-hold",
+      this.touch && p.alive && (!!objective || (!!s.work && s.worker === p.id)),
     );
     const prog = el.progress as HTMLProgressElement;
     prog.hidden = s.worker !== p.id;
@@ -566,7 +584,7 @@ export class MatchHud {
   /** Bottom-right list of everything the viewed player carries, with the key that draws it. */
   inventory(view: Player) {
     const s = this.sim,
-      rows: [Action, string, string, boolean][] = [];
+      rows: [Action, string, string, boolean, number][] = [];
     const mag = (m: { ammo: number; reserve: number }) =>
       m.ammo + " / " + m.reserve;
     if (view.primary)
@@ -575,6 +593,7 @@ export class MatchHud {
         weaponName(view.primary.id),
         mag(view.primary),
         view.weapon === view.primary.id,
+        1,
       ]);
     rows.push([
       "pistol",
@@ -582,8 +601,9 @@ export class MatchHud {
         (view.pistol.id === "glock" && view.glockBurst ? " \u00b7 Burst" : ""),
       mag(view.pistol),
       view.weapon === view.pistol.id,
+      2,
     ]);
-    rows.push(["knife", "Knife", "", view.weapon === "knife"]);
+    rows.push(["knife", "Knife", "", view.weapon === "knife", 3]);
     for (const n of nades)
       if (view[n] > 0)
         rows.push([
@@ -591,18 +611,21 @@ export class MatchHud {
           shop[n].name,
           view[n] > 1 ? "\u00d7" + view[n] : "",
           view.weapon === n,
+          // Touch draws this exact grenade (slots 11-14) rather than cycling.
+          11 + nades.indexOf(n),
         ]);
     if (s.carrier === view.id)
-      rows.push(["bomb", "C4 explosive", "", view.weapon === "bomb"]);
-    if (view.kit) rows.push(["use", "Defuse kit", "", false]);
+      rows.push(["bomb", "C4 explosive", "", view.weapon === "bomb", 5]);
+    if (view.kit) rows.push(["use", "Defuse kit", "", false, 0]);
     const key = rows.map((r) => r.join("|") + keyName(r[0])).join(";");
     if (key === this.lastInventory) return;
     this.lastInventory = key;
     const list = this.ids.inventory;
     list.replaceChildren(
-      ...rows.map(([action, name, detail, active]) => {
+      ...rows.map(([action, name, detail, active, slot]) => {
         const li = document.createElement("li");
         if (active) li.className = "on";
+        if (slot) li.dataset.slot = String(slot);
         const k = document.createElement("kbd"),
           n = document.createElement("span"),
           d = document.createElement("b");

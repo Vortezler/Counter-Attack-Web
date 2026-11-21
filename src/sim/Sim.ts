@@ -395,7 +395,9 @@ export class Sim {
             ? "knife"
             : slot === 4
               ? this.nextNade(p)
-              : slot === 5 && this.carrier === p.id
+              : slot >= 11 && slot <= 14 && p[nades[slot - 11]] > 0
+                ? nades[slot - 11]
+                : slot === 5 && this.carrier === p.id
                 ? "bomb"
                 : slot === -1 && items.includes(p.previous)
                   ? p.previous

@@ -10,7 +10,8 @@ export default defineConfig(({ command, mode }) => {
     env.VITE_SUPABASE_PUBLISHABLE_KEY,
   );
   return {
-    base: env.VITE_BASE_PATH || "/cs-web/",
+    // The Android app (Capacitor) serves the bundle from the WebView origin root.
+    base: mode === "android" ? "/" : env.VITE_BASE_PATH || "/cs-web/",
     build: { license: true },
     server: {
       host: "127.0.0.1",

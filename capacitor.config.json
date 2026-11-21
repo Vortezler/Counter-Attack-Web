@@ -1,0 +1,18 @@
+{
+  "appId": "io.github.vortezler.counterattack",
+  "appName": "Counter-Attack",
+  "webDir": "dist-android",
+  "backgroundColor": "#111411",
+  "android": {
+    "backgroundColor": "#111411",
+    "allowMixedContent": false,
+    "captureInput": false,
+    "initialFocus": true
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "disable",
+      "hidden": true
+    }
+  }
+}
