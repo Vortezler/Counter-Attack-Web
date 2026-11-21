@@ -498,6 +498,7 @@ body {
   .csw-killpop.on {
     animation-duration: 0.01s;
   }
+}
 .csw-peer-status {
   position: fixed;
   z-index: 100;
