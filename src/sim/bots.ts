@@ -82,7 +82,8 @@ export function botCommand(s: Sim, p: Player) {
     cmd.pitch = p.pitch + clamp(pitch - p.pitch, -0.1, 0.1);
     if (
       s.time - p.seen > reaction &&
-      Math.abs(normalized(cmd.yaw - look)) < 0.22
+      Math.abs(normalized(cmd.yaw - look)) < 0.22 &&
+      !s.teammateInLine(p, target)
     ) {
       cmd.alt =
         !!scopes[p.weapon] &&

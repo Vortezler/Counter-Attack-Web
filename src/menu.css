@@ -1042,3 +1042,7 @@
     animation: none !important;
   }
 }
+
+.csw-modegrid {
+  grid-template-columns: 1fr 1fr;
+}

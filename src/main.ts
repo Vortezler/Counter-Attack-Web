@@ -68,6 +68,7 @@ async function openSolo() {
       ? (q.get("map") as LobbyMap)
       : "dust2",
     side: q.get("side") === "T" ? "T" : "CT",
+    mode: q.get("mode") === "casual" ? "casual" : "competitive",
     difficulty:
       q.get("difficulty") === "easy"
         ? "easy"

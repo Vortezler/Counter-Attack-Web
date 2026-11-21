@@ -39,6 +39,7 @@ const touchAction = (key: string): Action | undefined =>
 const slots: Partial<Record<Action, number>> = {
   primary: 1,
   pistol: 2,
+  knife: 3,
   grenade: 4,
   bomb: 5,
   previous: -1,
@@ -81,6 +82,7 @@ export async function createGame(
     map: opts.map ?? "dust2",
     side: opts.side ?? "CT",
     difficulty: opts.difficulty ?? "normal",
+    mode: opts.mode ?? "competitive",
     playerName: opts.playerName ?? "Player",
     settings: mergeSettings(),
   };
@@ -399,6 +401,7 @@ export async function createGame(
         c.playerName,
         opts.seed ?? (Math.random() * 0xffffffff) >>> 0,
         opts.botsOnly,
+        c.mode ?? "competitive",
       );
       if (network) {
         sim.remotePlayer = peerPlayer;
@@ -884,6 +887,11 @@ export async function createGame(
       spectating: !me.alive || fly,
       reducedMotion: reduced.matches,
       kick: Math.max(0, 1 - (s.time - watched.lastFire) / 0.12),
+      swing:
+        weapon === "knife"
+          ? Math.min(1, (s.time - watched.lastFire) / (watched.heavy ? 0.5 : 0.32))
+          : 1,
+      heavy: watched.heavy,
       move: Math.min(1, Math.hypot(watched.vx, watched.vz) / 6),
       reload:
         watched.reloadEnd && isGun(weapon)

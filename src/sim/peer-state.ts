@@ -9,11 +9,11 @@ const numeric = ["x", "y", "z", "vx", "vz", "yaw", "pitch", "hp", "armor", "mone
 const flags = ["kit", "helmet", "ground"] as const;
 const commandFlags = ["fire", "alt", "jump", "crouch", "walk", "use", "reload"] as const;
 function weapon(value: unknown): value is Weapon {
-  return typeof value === "string" && (Object.hasOwn(catalog, value) || isNade(value) || value === "bomb");
+  return typeof value === "string" && (Object.hasOwn(catalog, value) || isNade(value) || value === "bomb" || value === "knife");
 }
 
 const phases = ["warmup", "freeze", "live", "planted", "ended", "finished"];
-const slots = [0, 1, 2, 4, 5, -1, 9, -9];
+const slots = [0, 1, 2, 3, 4, 5, -1, 9, -9];
 type Payload = Record<string, unknown>;
 
 export function record(value: unknown): value is Payload {
@@ -54,7 +54,7 @@ export function projectFrame(sim: Sim, compact = false) {
       ...Object.fromEntries(numeric.map(k => [k, number(p[k])])),
       ...Object.fromEntries(flags.map(k => [k, p[k]])),
       team: p.team, weapon: p.weapon, primary: p.primary, pistol: p.pistol, crouched: p.crouched,
-      vy: number(p.vy), jumpHeld: !!p.lastCmd.jump,
+      vy: number(p.vy), jumpHeld: !!p.lastCmd.jump, glockBurst: p.glockBurst,
     })),
   };
 }
@@ -125,6 +125,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
     target.primary = p.primary as Magazine | null;
     target.body.crouch = p.crouched as boolean;
     target.vy = finite(p.vy) ? p.vy : 0;
+    target.glockBurst = p.glockBurst === true;
     target.lastCmd = { ...target.lastCmd, jump: p.jumpHeld === true };
   }
   sim.smokes = smokes;
@@ -142,7 +143,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
 export function readEvent(value: unknown): SimEvent | null {
   if (!record(value) || typeof value.type !== "string" ||
       !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step",
-        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce"].includes(value.type)) return null;
+        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash"].includes(value.type)) return null;
   const event: SimEvent = { type: value.type };
   for (const key of ["actor", "victim"] as const) {
     const index = value[key];

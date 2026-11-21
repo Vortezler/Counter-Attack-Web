@@ -4,13 +4,14 @@ import {
   shop,
   isGun,
   isNade,
+  nades,
   weaponName,
   type Item,
 } from "./config/weapons";
 import { patterns } from "./config/recoilPatterns";
 import type { Player } from "./sim/player";
 import { hubUrl } from "./hub/navigation";
-import { keyName, mountBindEditor } from "./keybinds";
+import { keyName, mountBindEditor, type Action } from "./keybinds";
 const money = (v: number) => "$" + v.toLocaleString("en-US");
 const clock = (v: number) => {
   const seconds = Math.ceil(Math.max(0, v));
@@ -46,6 +47,7 @@ export class MatchHud {
   hint = "";
   popEnd = 0;
   unbind: (() => void) | null = null;
+  lastInventory = "";
   abort = new AbortController();
   constructor(
     parent: HTMLElement,
@@ -69,7 +71,7 @@ export class MatchHud {
  <div class="csw-center-msg"><small data-ui="phase"></small><strong data-ui="banner"></strong><span data-ui="prompt"></span><progress data-ui="progress" hidden></progress></div>
  <div class="csw-vitals"><div><small>HEALTH</small><strong data-ui="hp"></strong></div><div><small>ARMOR</small><strong data-ui="armor"></strong></div><div class="csw-kills"><small>KILLS</small><strong data-ui="kills" data-testid="kill-counter"></strong><span data-ui="tally" aria-hidden="true"></span></div></div>
  <div class="csw-smoke" data-ui="smoke"></div><div class="csw-killpop" data-ui="killpop" aria-hidden="true"></div>
- <div class="csw-ammo"><small data-ui="weapon"></small><strong data-ui="ammo"></strong><span data-ui="reserve"></span></div>
+ <ol class="csw-inventory" data-ui="inventory" aria-label="Inventory"></ol><div class="csw-ammo"><small data-ui="weapon"></small><strong data-ui="ammo"></strong><span data-ui="reserve"></span></div>
  <div class="csw-debug" data-ui="debug" hidden><span data-ui="metrics"></span><canvas data-ui="spray" width="96" height="68" aria-label="Weapon recoil pattern"></canvas></div><div class="csw-flash" data-ui="flash"></div>
  <div class="csw-panel" data-ui="panel" hidden></div><div class="csw-a11y" aria-live="polite" data-ui="status"></div>`;
     parent.append(this.root);
@@ -299,6 +301,7 @@ export class MatchHud {
         text:
           src +
           "  /  " +
+          (e.message === "teamkill" ? "TEAMKILL " : "") +
           (e.weapon ? weaponName(e.weapon) : "") +
           (e.head ? " ✛" : "") +
           "  /  " +
@@ -344,6 +347,9 @@ export class MatchHud {
     }
     if (e.message) this.ids.status.textContent = e.message;
     if (e.type === "plant") this.note(e.message!);
+    if (e.type === "mode" && e.actor === s.me.id) this.note(e.message!);
+    if (e.type === "kill" && e.message === "teamkill" && e.actor === s.me.id)
+      this.note("You killed a teammate \u00b7 -$300");
     if (e.type === "matchEnd") this.scoreboard(true);
   }
   paintRadarMap() {
@@ -467,7 +473,12 @@ export class MatchHud {
         (view.headshots ? "  HS " + view.headshots : ""),
     );
     label(el.cash, money(p.money));
-    label(el.weapon, weaponName(view.weapon));
+    label(
+      el.weapon,
+      weaponName(view.weapon) +
+        (view.weapon === "glock" && view.glockBurst ? " \u00b7 Burst" : ""),
+    );
+    this.inventory(view);
     label(
       el.ammo,
       String(view.mag?.ammo ?? (isNade(view.weapon) ? view[view.weapon] : "•")),
@@ -551,6 +562,57 @@ export class MatchHud {
         }
       }
     }
+  }
+  /** Bottom-right list of everything the viewed player carries, with the key that draws it. */
+  inventory(view: Player) {
+    const s = this.sim,
+      rows: [Action, string, string, boolean][] = [];
+    const mag = (m: { ammo: number; reserve: number }) =>
+      m.ammo + " / " + m.reserve;
+    if (view.primary)
+      rows.push([
+        "primary",
+        weaponName(view.primary.id),
+        mag(view.primary),
+        view.weapon === view.primary.id,
+      ]);
+    rows.push([
+      "pistol",
+      weaponName(view.pistol.id) +
+        (view.pistol.id === "glock" && view.glockBurst ? " \u00b7 Burst" : ""),
+      mag(view.pistol),
+      view.weapon === view.pistol.id,
+    ]);
+    rows.push(["knife", "Knife", "", view.weapon === "knife"]);
+    for (const n of nades)
+      if (view[n] > 0)
+        rows.push([
+          "grenade",
+          shop[n].name,
+          view[n] > 1 ? "\u00d7" + view[n] : "",
+          view.weapon === n,
+        ]);
+    if (s.carrier === view.id)
+      rows.push(["bomb", "C4 explosive", "", view.weapon === "bomb"]);
+    if (view.kit) rows.push(["use", "Defuse kit", "", false]);
+    const key = rows.map((r) => r.join("|") + keyName(r[0])).join(";");
+    if (key === this.lastInventory) return;
+    this.lastInventory = key;
+    const list = this.ids.inventory;
+    list.replaceChildren(
+      ...rows.map(([action, name, detail, active]) => {
+        const li = document.createElement("li");
+        if (active) li.className = "on";
+        const k = document.createElement("kbd"),
+          n = document.createElement("span"),
+          d = document.createElement("b");
+        k.textContent = keyName(action);
+        n.textContent = name;
+        d.textContent = detail;
+        li.append(k, n, d);
+        return li;
+      }),
+    );
   }
   destroy() {
     this.abort.abort();

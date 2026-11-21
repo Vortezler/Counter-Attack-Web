@@ -743,6 +743,53 @@ export class GameAudio {
       );
     } else if (e.type === "hit" && e.actor === 0 && e.victim !== 0)
       this.marker(e);
+    else if (e.type === "slash")
+      this.voice(
+        e,
+        0.45,
+        (out, n, t) => {
+          // Whoosh, then flesh thud or a steel clink on walls.
+          const air = this.hiss(
+            out,
+            n,
+            t,
+            e.head ? 0.26 : 0.18,
+            900,
+            0.32,
+            "bandpass",
+            0.7,
+            0.04,
+          );
+          air.frequency.setValueAtTime(600, t);
+          air.frequency.exponentialRampToValueAtTime(2600, t + 0.15);
+          if (e.message === "hit" || e.message === "backstab") {
+            this.tone(
+              out,
+              n,
+              t + 0.06,
+              0.12,
+              140,
+              60,
+              e.message === "backstab" ? 0.5 : 0.35,
+            );
+            this.hiss(out, n, t + 0.06, 0.1, 700, 0.3, "lowpass");
+          } else if (e.message === "wall") {
+            this.tone(out, n, t + 0.05, 0.18, 3400, 3200, 0.08, "triangle");
+            this.click(out, n, t + 0.05, 0.2, 4200);
+          }
+        },
+        { wet: 0.12, reach: 35 },
+      );
+    else if (e.type === "mode")
+      this.voice(
+        { type: "ui" },
+        0.15,
+        (out, n, t) => {
+          this.click(out, n, t, 0.16, 2600);
+          this.click(out, n, t + 0.06, 0.12, 1900);
+        },
+        { wet: 0 },
+      );
     else if (e.type === "roundEnd" || e.type === "live" || e.type === "ui") {
       this.voice(
         e,

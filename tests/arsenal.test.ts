@@ -133,34 +133,44 @@ describe("utility", () => {
     expect(s.smokes.length).toBe(0);
     expect(s.visible(a, b)).toBe(true);
   });
-  it("burns enemies standing in a molotov but not the thrower's team", () => {
-    const s = fixture(),
-      p = s.me;
-    s.phase = "live";
-    s.left = 100;
-    const spot = s.map.spawns.T[0];
-    place(s, 5, { ...spot });
-    place(s, 1, { ...spot, x: spot.x + 1 });
-    p.molly = 1;
-    s.ignite(
-      {
-        id: 99,
-        type: "molly",
-        owner: 0,
-        body: null!,
-        born: s.time,
-        expires: 0,
-        lastVy: 0,
-      },
-      { ...spot, y: 0.5 },
-    );
-    expect(s.fires.length).toBe(1);
-    step(s, 64);
-    expect(s.players[5].hp).toBeLessThan(70);
-    expect(s.players[1].hp).toBe(100);
-    step(s, 64 * 7);
-    expect(s.fires.length).toBe(0);
-  });
+  it.each(["competitive", "casual"] as const)(
+    "%s: burns enemies fully and the thrower's team at the mode's friendly-fire rate",
+    (mode) => {
+      const s = fixture(),
+        p = s.me;
+      s.mode = mode;
+      s.phase = "live";
+      s.left = 100;
+      // Away from T spawn so only the two placed players stand in the fire.
+      const spot = { ...s.map.spawns.T[0], z: s.map.spawns.T[0].z - 6 };
+      place(s, 5, { ...spot });
+      place(s, 1, { ...spot, x: spot.x + 1 });
+      p.molly = 1;
+      s.ignite(
+        {
+          id: 99,
+          type: "molly",
+          owner: 0,
+          body: null!,
+          born: s.time,
+          expires: 0,
+          lastVy: 0,
+        },
+        { ...spot, y: 0.5 },
+      );
+      expect(s.fires.length).toBe(1);
+      step(s, 64);
+      expect(s.players[5].hp).toBeLessThan(70);
+      const ally = 100 - s.players[1].hp;
+      if (mode === "casual") expect(ally).toBe(0);
+      else {
+        expect(ally).toBeGreaterThan(0);
+        expect(ally).toBeLessThan((100 - s.players[5].hp) / 2);
+      }
+      step(s, 64 * 7);
+      expect(s.fires.length).toBe(0);
+    },
+  );
   it("puts out a fire when a smoke lands on it, and a molotov fizzles inside smoke", () => {
     const s = fixture();
     s.phase = "live";

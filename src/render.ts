@@ -19,6 +19,9 @@ export interface RenderFrame {
   viewId: number;
   weapon: string;
   kick?: number;
+  /** Knife swing progress, 0 at the start of an attack and 1 at rest. */
+  swing?: number;
+  heavy?: boolean;
   reload?: number;
   move?: number;
   time?: number;
@@ -93,6 +96,30 @@ function barrel(
   return m;
 }
 function special(id: string, g: THREE.Group) {
+  if (id === "knife") {
+    const blade = new THREE.BufferGeometry();
+    // A tapered blade with a clipped point, built flat and extruded slightly.
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.012, 0);
+    shape.lineTo(0.016, 0);
+    shape.lineTo(0.016, -0.17);
+    shape.lineTo(0.004, -0.215);
+    shape.lineTo(-0.012, -0.19);
+    shape.lineTo(-0.012, 0);
+    blade.copy(
+      new THREE.ExtrudeGeometry(shape, { depth: 0.004, bevelEnabled: false }),
+    );
+    blade.rotateX(-Math.PI / 2);
+    blade.rotateZ(Math.PI / 2);
+    piece(g, blade, "#b9bfbd", 0, 0.02, -0.06);
+    part(g, 0.006, 0.022, 0.15, "#8d9391", 0, 0.03, -0.13);
+    part(g, 0.05, 0.016, 0.018, gunmetal, 0, 0.018, -0.055);
+    const handle = part(g, 0.026, 0.03, 0.11, "#2d302c", 0, 0.012, 0.005);
+    for (let i = 0; i < 4; i++)
+      part(handle, 0.028, 0.032, 0.006, "#454a44", 0, 0, -0.04 + i * 0.026);
+    part(g, 0.03, 0.034, 0.014, gunmetal, 0, 0.012, 0.064);
+    return true;
+  }
   if (id === "smoke") {
     piece(
       g,
@@ -499,13 +526,16 @@ function heldWeapon(id: string) {
     "bomb",
     "glock",
     "deagle",
+    "knife",
   ].includes(id);
-  hand(
-    small ? -0.043 : -0.038,
-    small ? -0.104 : -0.038,
-    small ? -0.025 : -0.195,
-    true,
-  );
+  // A knife is held one-handed, so the off hand stays out of the swing.
+  if (id !== "knife")
+    hand(
+      small ? -0.043 : -0.038,
+      small ? -0.104 : -0.038,
+      small ? -0.025 : -0.195,
+      true,
+    );
   return rig;
 }
 function flatten(group: THREE.Group) {
@@ -2507,6 +2537,7 @@ export class GameRenderer {
         "smoke",
         "molly",
         "bomb",
+        "knife",
       ].includes(f.weapon);
       rig.position.set(
         0.205 + Math.sin(t * 6.5) * 0.009 * move,
@@ -2518,6 +2549,18 @@ export class GameRenderer {
         -0.1,
         0.028 + dip * 0.51,
       );
+      if (f.weapon === "knife" && (f.swing ?? 1) < 1 && !f.reducedMotion) {
+        // Slash sweeps right-to-left; the heavy stab drives forward.
+        const s = Math.sin((f.swing ?? 1) * Math.PI);
+        if (f.heavy) {
+          rig.position.z -= 0.18 * s;
+          rig.rotation.x -= 0.55 * s;
+        } else {
+          rig.position.x -= 0.16 * s;
+          rig.rotation.z += 1.1 * s;
+          rig.rotation.y += 0.6 * s;
+        }
+      }
       rig.scale.setScalar(1.12);
       this.viewFlash -= elapsed;
       this.muzzleLight.visible =

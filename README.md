@@ -2,7 +2,7 @@
 
 **CS Web (fan project)**
 
-A browser FPS for desktop keyboard and mouse, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
+A browser FPS for desktop keyboard and mouse, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, Competitive (friendly fire) or Casual (free armor, CT defuse kits, no friendly fire), pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
 ## Play locally
 
@@ -23,6 +23,8 @@ Open [the game lobby](http://127.0.0.1:5177/cs-web/). Choose a callsign and **St
 | R / Q / wheel | Reload / previous equipment / cycle equipment |
 | 1 / 2 / 4 / 5 | Primary / pistol / cycle grenades (HE, flash, smoke, molotov) / carried objective |
 | Esc | Leave fullscreen and pause; every other bind can be changed under Controls |
+| 3 | Knife: left click slashes (40), right click stabs (65); a stab from behind always kills |
+| Right mouse with the Glock | Toggle three-round burst fire |
 | Hold and release mouse with a grenade | Throw after the pin pull. Left gives a full throw, right a lob, both a medium throw. |
 | Hold E | Plant at A or B while carrying the objective, or defuse beside it |
 | B / Tab / Esc | Buy menu / hold scoreboard / pause |

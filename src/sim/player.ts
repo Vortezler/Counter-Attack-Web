@@ -78,6 +78,9 @@ export class Player {
   patrol: "A" | "B" = "A";
   nadeUsed = false;
   smokeUsed = false;
+  glockBurst = false;
+  heavy = false;
+  burstLeft = 0;
   heard: Vec3 | null = null;
   staging: { x: number; z: number } | null = null;
   constructor(
@@ -121,6 +124,7 @@ export class Player {
     this.flash = 0;
     this.smoke = 0;
     this.molly = 0;
+    this.glockBurst = false;
   }
   respawn(pos: Vec3 & { yaw: number }, fresh: boolean) {
     if (!this.alive || fresh) this.resetGear();
@@ -147,6 +151,7 @@ export class Player {
     this.heard = null;
     this.nadeUsed = false;
     this.smokeUsed = false;
+    this.burstLeft = 0;
     this.roundKills = 0;
     this.lastCmd = idle(pos.yaw);
     this.weapon = this.primary?.id ?? this.pistol.id;

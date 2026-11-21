@@ -225,8 +225,14 @@ export const nadeLimit: Record<Nade, number> = {
   smoke: 1,
   molly: 1,
 };
-export type Weapon = Gun | Nade | "bomb";
-export type Item = Exclude<Weapon, "bomb"> | "kevlar" | "helmet" | "kit";
+export type Weapon = Gun | Nade | "bomb" | "knife";
+export type Item =
+  Exclude<Weapon, "bomb" | "knife"> | "kevlar" | "helmet" | "kit";
+/** Knife attacks: [damage, backstab damage, reach in metres, seconds until the next swing]. */
+export const knife = {
+  slash: [40, 90, 1.6, 0.4],
+  stab: [65, 180, 1.3, 1.0],
+} as const;
 export const gear = {
   he: { name: "HE grenade", price: 300 },
   flash: { name: "Flashbang", price: 200 },
@@ -253,7 +259,13 @@ export const semiAuto = new Set<string>([
   "nova",
 ]);
 export function killReward(w: string) {
-  return w === "awp" ? 100 : w === "nova" || w === "xm" ? 900 : 300;
+  return w === "awp"
+    ? 100
+    : w === "nova" || w === "xm"
+      ? 900
+      : w === "knife"
+        ? 1500
+        : 300;
 }
 export const isNade = (key: string): key is Nade =>
   (nades as string[]).includes(key);
@@ -261,7 +273,7 @@ export function isGun(key: string): key is Gun {
   return Object.hasOwn(catalog, key);
 }
 export function weaponName(key: Weapon) {
-  return key === "bomb" ? "C4" : shop[key].name;
+  return key === "bomb" ? "C4" : key === "knife" ? "Knife" : shop[key].name;
 }
 export function magazine(id: Gun) {
   return {

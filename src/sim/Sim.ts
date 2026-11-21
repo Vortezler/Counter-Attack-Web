@@ -14,6 +14,7 @@ import {
   isNade,
   nadeLimit,
   nades,
+  knife,
   type Item,
   type Gun,
   type Nade,
@@ -40,6 +41,15 @@ import {
 } from "./rules";
 import { botCommand } from "./bots";
 export type Difficulty = "easy" | "normal" | "hard";
+/** Competitive has friendly fire; casual gives everyone full armor and every CT a defuse kit. */
+export type GameMode = "competitive" | "casual";
+/** CS-style friendly-fire scaling for damage between teammates in competitive. */
+export const teamDamage = {
+  bullet: 0.33,
+  grenade: 0.85,
+  fire: 0.4,
+  melee: 0.4,
+};
 type Phase = "warmup" | "freeze" | "live" | "planted" | "ended" | "finished";
 export interface SimEvent {
   type: string;
@@ -142,6 +152,7 @@ export class Sim {
     name = "Player",
     seed = 17,
     public botsOnly = false,
+    public mode: GameMode = "competitive",
   ) {
     this.rng = seeded(seed);
     this.physics = new Physics(map);
@@ -211,6 +222,11 @@ export class Sim {
           : this.map.spawns[p.team];
       const pos = arr[idx % arr.length];
       p.respawn(pos, fresh);
+      if (this.mode === "casual" && this.map.id !== "range") {
+        p.armor = 100;
+        p.helmet = true;
+        if (p.team === "CT") p.kit = true;
+      }
       this.physics.enable(p.body, true);
       p.body.crouch = false;
       p.body.collider.setHalfHeight(20 * U);
@@ -350,14 +366,23 @@ export class Sim {
     p.scoped = 0;
     p.reloadEnd = 0;
     p.windup = 0;
+    p.burstLeft = 0;
     p.index = p.punchX = p.punchY = p.penalty = 0;
     p.drawEnd =
-      this.time + (isGun(w) ? (catalog[w].slot === 1 ? 0.5 : 0.4) : 0.7);
+      this.time +
+      (isGun(w)
+        ? catalog[w].slot === 1
+          ? 0.5
+          : 0.4
+        : w === "knife"
+          ? 0.3
+          : 0.7);
   }
   switch(p: Player, slot: number) {
     const items: Weapon[] = [
       ...(p.primary ? [p.primary.id] : []),
       p.pistol.id,
+      "knife",
       ...nades.filter((k) => p[k] > 0),
       ...(this.carrier === p.id ? ["bomb" as const] : []),
     ];
@@ -366,20 +391,22 @@ export class Sim {
         ? p.primary?.id
         : slot === 2
           ? p.pistol.id
-          : slot === 4
-            ? this.nextNade(p)
-            : slot === 5 && this.carrier === p.id
-              ? "bomb"
-              : slot === -1 && items.includes(p.previous)
-                ? p.previous
-                : slot === 9 || slot === -9
-                  ? items[
-                      (items.indexOf(p.weapon) +
-                        (slot === 9 ? 1 : -1) +
-                        items.length) %
-                        items.length
-                    ]
-                  : undefined;
+          : slot === 3
+            ? "knife"
+            : slot === 4
+              ? this.nextNade(p)
+              : slot === 5 && this.carrier === p.id
+                ? "bomb"
+                : slot === -1 && items.includes(p.previous)
+                  ? p.previous
+                  : slot === 9 || slot === -9
+                    ? items[
+                        (items.indexOf(p.weapon) +
+                          (slot === 9 ? 1 : -1) +
+                          items.length) %
+                          items.length
+                      ]
+                    : undefined;
     if (selected) this.equip(p, selected);
   }
   nextNade(p: Player): Nade | undefined {
@@ -416,7 +443,9 @@ export class Sim {
     if (this.phase === "warmup" && this.left <= 0) {
       this.phase = "freeze";
       this.left = 15;
-      for (const p of this.players) if (this.botsOnly || (p.id !== 0 && p.id !== this.remotePlayer)) this.botBuy(p);
+      for (const p of this.players)
+        if (this.botsOnly || (p.id !== 0 && p.id !== this.remotePlayer))
+          this.botBuy(p);
     }
     if (this.phase === "ended") {
       if (this.left <= 0) {
@@ -484,6 +513,7 @@ export class Sim {
         p.mag.reserve
       ) {
         p.reloadEnd = this.time + catalog[p.mag.id].reload;
+        p.burstLeft = 0;
         p.scoped = 0;
         this.emit({ type: "reload", actor: p.id, pos: p.eye });
       }
@@ -593,7 +623,9 @@ export class Sim {
           : 100
         : isGun(p.weapon)
           ? catalog[p.weapon].speed
-          : 245) *
+          : p.weapon === "knife"
+            ? 250
+            : 245) *
       U *
       (c.crouch ? 0.34 : c.walk ? 0.52 : 1);
     const sync = p.ground;
@@ -685,21 +717,127 @@ export class Sim {
       }
       return;
     }
+    if (p.weapon === "knife") {
+      // Left slashes, right stabs; holding either keeps swinging at that attack's pace.
+      if (this.time >= p.nextFire && (c.fire || c.alt))
+        this.swing(p, c.alt && !c.fire ? "stab" : "slash");
+      return;
+    }
     if (!isGun(p.weapon)) return;
     const levels = scopes[p.weapon] ?? 0;
     if (levels && c.alt && !p.lastCmd.alt && this.time - p.lastFire > 0.15)
       p.scoped = (p.scoped + 1) % (levels + 1);
+    if (p.weapon === "glock" && c.alt && !p.lastCmd.alt) {
+      p.glockBurst = !p.glockBurst;
+      p.burstLeft = 0;
+      this.emit({
+        type: "mode",
+        actor: p.id,
+        message: p.glockBurst
+          ? "Switched to burst-fire mode"
+          : "Switched to semi-automatic",
+      });
+    }
     const m = p.mag;
+    // A Glock burst keeps firing its three rounds after the trigger is released.
+    if (p.burstLeft > 0) {
+      if (p.weapon !== "glock" || !m || m.ammo <= 0) p.burstLeft = 0;
+      else if (this.time >= p.nextFire) this.fire(p, p.weapon, m);
+      return;
+    }
     if (!m || !c.fire || this.time < p.nextFire || m.ammo <= 0) return;
     if (semiAuto.has(p.weapon) && p.lastCmd.fire) return;
-    const w = catalog[p.weapon];
+    if (p.weapon === "glock" && p.glockBurst) p.burstLeft = 3;
+    this.fire(p, p.weapon, m);
+  }
+  fire(p: Player, g: Gun, m: { ammo: number }) {
+    const w = catalog[g],
+      burst = p.burstLeft > 0;
     m.ammo--;
-    p.nextFire = Math.max(this.time - DT, p.nextFire) + 60 / w.rpm;
-    this.shoot(p, p.weapon);
+    if (burst) {
+      p.burstLeft--;
+      p.nextFire = this.time + (p.burstLeft > 0 ? 0.06 : 0.5);
+    } else p.nextFire = Math.max(this.time - DT, p.nextFire) + 60 / w.rpm;
+    this.shoot(p, g);
     p.lastFire = this.time;
     p.index++;
-    p.penalty += w.spread[4];
-    if (p.weapon !== "aug") p.scoped = 0;
+    p.penalty += w.spread[4] + (burst ? 0.35 : 0);
+    if (g !== "aug") p.scoped = 0;
+  }
+  /** A knife attack: short traces ahead of the eye; from behind the victim it becomes a backstab. */
+  swing(p: Player, kind: keyof typeof knife) {
+    const [base, back, reach, delay] = knife[kind];
+    p.nextFire = this.time + delay;
+    p.lastFire = this.time;
+    p.heavy = kind === "stab";
+    const ignore = new Set([p.id]);
+    let result = "miss",
+      at: Vec3 = p.eye;
+    for (const off of [0, 0.1, -0.1]) {
+      const yaw = p.yaw + off,
+        dir = {
+          x: Math.sin(yaw) * Math.cos(p.pitch),
+          y: Math.sin(p.pitch),
+          z: -Math.cos(yaw) * Math.cos(p.pitch),
+        };
+      const hit = this.physics.trace(p.eye, dir, reach, ignore);
+      if (!hit) continue;
+      at = advance(p.eye, dir, hit.timeOfImpact);
+      const victim = this.physics.victims.get(hit.collider.handle);
+      if (!victim) {
+        if (result === "miss") {
+          result = "wall";
+          this.emit({ type: "impact", pos: at, normal: hit.normal });
+        }
+        continue;
+      }
+      const v = this.players[victim.id];
+      const scale = this.teamScale(p, v, "melee");
+      if (!v.alive || !scale) continue;
+      // Backstab when the attacker stands behind the victim's facing.
+      const fx = Math.sin(v.yaw),
+        fz = -Math.cos(v.yaw),
+        dx = p.x - v.x,
+        dz = p.z - v.z,
+        behind = (fx * dx + fz * dz) / (Math.hypot(dx, dz) || 1) < -0.3;
+      let hp = (behind ? back : base) * scale;
+      if (v.armor > 0) {
+        v.armor = Math.max(0, v.armor - hp * 0.15);
+        hp *= 0.85;
+      }
+      result = behind ? "backstab" : "hit";
+      this.hurt(v, Math.round(hp), p, "knife");
+      break;
+    }
+    this.hear(p, 8);
+    this.emit({
+      type: "slash",
+      actor: p.id,
+      pos: at,
+      message: result,
+      head: kind === "stab",
+    });
+  }
+  /** Damage multiplier for `attacker` hurting `v`: 1 between enemies, scaled or zero between teammates. */
+  teamScale(attacker: Player | null, v: Player, kind: keyof typeof teamDamage) {
+    if (!attacker || attacker.team !== v.team) return 1;
+    if (this.mode === "competitive")
+      return attacker.id === v.id ? 1 : teamDamage[kind];
+    return attacker.id === v.id && kind === "grenade" ? 1 : 0;
+  }
+  /** True when a living teammate stands between `p` and `target` (bots hold fire in competitive). */
+  teammateInLine(p: Player, target: Vec3) {
+    if (this.mode !== "competitive") return false;
+    const a = p.eye,
+      dx = target.x - a.x,
+      dz = target.z - a.z,
+      len = Math.hypot(dx, dz) || 1;
+    return this.players.some((q) => {
+      if (q === p || !q.alive || q.team !== p.team) return false;
+      const t = ((q.x - a.x) * dx + (q.z - a.z) * dz) / (len * len);
+      if (t <= 0 || t >= 1) return false;
+      return Math.hypot(a.x + dx * t - q.x, a.z + dz * t - q.z) < 0.7;
+    });
   }
   shoot(p: Player, g: Gun) {
     const hits: Hits = new Map();
@@ -713,7 +851,7 @@ export class Sim {
     for (const [id, h] of hits) {
       const v = this.players[id];
       v.armor = Math.max(0, h.armor);
-      this.hurt(v, h.hp, p, g, h.wall, h.head ? "head" : "chest");
+      this.hurt(v, Math.round(h.hp), p, g, h.wall, h.head ? "head" : "chest");
     }
     this.hear(p, g === "m4" ? 20 : 45);
     this.emit({ type: "shot", actor: p.id, pos: p.eye, end, weapon: g });
@@ -747,7 +885,8 @@ export class Sim {
       if (victim) {
         ignore.add(victim.id);
         const v = this.players[victim.id];
-        if (p.team !== v.team && v.alive) {
+        const scale = this.teamScale(p, v, "bullet");
+        if (scale > 0 && v.alive) {
           const acc = hits.get(v.id) ?? {
             hp: 0,
             armor: v.armor,
@@ -755,8 +894,8 @@ export class Sim {
             wall: false,
           };
           const d = damage(power, g, travel, victim.group, acc.armor, v.helmet);
-          acc.hp += d.hp;
-          acc.armor -= d.armor;
+          acc.hp += d.hp * scale;
+          acc.armor -= d.armor * scale;
           acc.head ||= victim.group === "head";
           acc.wall ||= walls > 0;
           hits.set(v.id, acc);
@@ -835,6 +974,11 @@ export class Sim {
       this.carrier = -1;
       this.bomb = { x: v.x, y: v.y + 0.15, z: v.z };
     }
+    const teamkill = !!p && p.team === v.team && p.id !== v.id;
+    if (teamkill && p) {
+      p.kills = Math.max(0, p.kills - 1);
+      p.money = capMoney(p.money - 300);
+    }
     if (p && p.team !== v.team) {
       p.kills++;
       p.roundKills++;
@@ -852,6 +996,7 @@ export class Sim {
       wallbang,
       head: group === "head",
       pos: { x: v.x, y: v.y + 0.9, z: v.z },
+      message: teamkill ? "teamkill" : undefined,
       dir: { x: dx / len, z: dz / len },
     });
   }
@@ -978,11 +1123,19 @@ export class Sim {
       for (const p of this.players)
         if (
           p.alive &&
-          p.team !== f.team &&
           Math.hypot(p.x - f.x, p.z - f.z) < f.r &&
           Math.abs(p.y - f.y) < 1.4
-        )
-          this.hurt(p, 10, this.players[f.owner], "molly");
+        ) {
+          const owner = this.players[f.owner];
+          // Casual never burns the thrower's team; competitive scales it down.
+          const scale =
+            p.team !== f.team
+              ? 1
+              : this.mode === "competitive"
+                ? teamDamage.fire
+                : 0;
+          if (scale) this.hurt(p, Math.round(10 * scale), owner, "molly");
+        }
     }
   }
   popSmoke(g: Grenade, o: Vec3) {
@@ -1045,7 +1198,10 @@ export class Sim {
         Number(this.visible(o, chest, smoke));
       if (!seen) continue;
       if (g.type === "he") {
-        const raw = (98 * (1 - dist / range) ** 1.2 * seen) / 2;
+        const raw =
+          ((98 * (1 - dist / range) ** 1.2 * seen) / 2) *
+          this.teamScale(this.players[g.owner], p, "grenade");
+        if (raw <= 0) continue;
         const armor = Math.min(p.armor, raw * 0.25);
         p.armor -= armor;
         this.hurt(p, Math.round(raw - armor * 2), this.players[g.owner], "he");

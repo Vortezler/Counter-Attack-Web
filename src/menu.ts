@@ -12,6 +12,11 @@ export const lobbyMaps: LobbyMap[] = [
 ];
 export type LobbySide = "CT" | "T";
 export type LobbyDifficulty = "easy" | "normal" | "hard";
+export type LobbyMode = "competitive" | "casual";
+const modeInfo: Record<LobbyMode, [string, string]> = {
+  competitive: ["Competitive", "5 vs 5 <b>·</b> First to 13 <b>·</b> Friendly fire"],
+  casual: ["Casual", "5 vs 5 <b>·</b> Free armor <b>·</b> CT kits <b>·</b> No friendly fire"],
+};
 export interface MenuSettings {
   sensitivity: number;
   volume: number;
@@ -25,6 +30,7 @@ export interface MenuChoice {
   map: LobbyMap;
   side: LobbySide;
   difficulty: LobbyDifficulty;
+  mode: LobbyMode;
   playerName: string;
   settings: MenuSettings;
 }
@@ -165,6 +171,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     map: options.map || "dust2",
     side: options.side || "CT",
     difficulty: options.difficulty || "normal",
+    mode: options.mode || "competitive",
     playerName: options.playerName || localRead("player-name") || "Operator",
     settings: mergeSettings(options.settings),
   };
@@ -194,7 +201,8 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     </div>
     <form class="csw-setup"><div class="csw-setuphead">${icon("sliders")}<h2>Match setup</h2></div>
       <div class="csw-setupbody">
-        <div class="csw-modeline"><span class="csw-modeicon">${icon("cross")}</span><div><strong>Competitive</strong><small>5 vs 5 <b>·</b> First to 13</small></div></div>
+        <div class="csw-modeline"><span class="csw-modeicon">${icon("cross")}</span><div><strong data-modename></strong><small data-modecopy></small></div></div>
+        <fieldset><legend>Game mode</legend><div class="csw-diffgrid csw-modegrid">${(["competitive", "casual"] as const).map((m) => `<button type="button" data-mode="${m}">${m}</button>`).join("")}</div></fieldset>
         <fieldset><legend>Starting side</legend><div class="csw-teamgrid">
         <button type="button" data-side="CT" aria-label="Counter-Terrorists">${insignia(true)}<span>Counter-Terrorists</span></button>
         <button type="button" data-side="T" aria-label="Terrorists">${insignia(false)}<span>Terrorists</span></button></div></fieldset>
@@ -244,6 +252,10 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       b.setAttribute("aria-pressed", String(b.dataset.map === choice.map));
     for (const b of all<HTMLButtonElement>("[data-side]"))
       b.setAttribute("aria-pressed", String(b.dataset.side === choice.side));
+    for (const b of all<HTMLButtonElement>("[data-mode]"))
+      b.setAttribute("aria-pressed", String(b.dataset.mode === choice.mode));
+    get("[data-modename]").textContent = modeInfo[choice.mode][0];
+    get("[data-modecopy]").innerHTML = modeInfo[choice.mode][1];
     for (const b of all<HTMLButtonElement>("[data-difficulty]"))
       b.setAttribute(
         "aria-pressed",
@@ -355,7 +367,11 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     (e) => {
       const b = (e.target as Element).closest<HTMLButtonElement>("button");
       if (!b) return;
-      const { map, side, difficulty, nav } = b.dataset;
+      const { map, side, difficulty, nav, mode } = b.dataset;
+      if (mode === "competitive" || mode === "casual") {
+        choice.mode = mode;
+        reflect();
+      }
       if (map && (lobbyMaps as string[]).includes(map)) {
         choice.map = map as LobbyMap;
         reflect();
