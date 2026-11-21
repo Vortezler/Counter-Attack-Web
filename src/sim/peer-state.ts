@@ -39,16 +39,18 @@ export function readCommand(value: unknown): PlayerCommand | null {
   return cmd;
 }
 
-export function projectFrame(sim: Sim) {
+export function projectFrame(sim: Sim, compact = false) {
+  const number = (value: number) => compact ? Math.round(value * 1000) / 1000 : value;
   return {
     tick: sim.tick, time: sim.time, round: sim.round, phase: sim.phase, left: sim.left,
     score: sim.score, result: sim.result, carrier: sim.carrier, bomb: sim.bomb,
     plantedSite: sim.plantedSite, action: sim.action, worker: sim.worker, work: sim.work,
     grenades: sim.grenades.map(g => ({ ...g.body.translation(), id: g.id, type: g.type })),
     players: sim.players.map(p => ({
-      ...Object.fromEntries(numeric.map(k => [k, p[k]])),
+      ...Object.fromEntries(numeric.map(k => [k, number(p[k])])),
       ...Object.fromEntries(flags.map(k => [k, p[k]])),
       team: p.team, weapon: p.weapon, primary: p.primary, pistol: p.pistol, crouched: p.crouched,
+      vy: number(p.vy), jumpHeld: !!p.lastCmd.jump,
     })),
   };
 }
@@ -93,6 +95,8 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
     target.pistol = p.pistol as Magazine;
     target.primary = p.primary as Magazine | null;
     target.body.crouch = p.crouched as boolean;
+    target.vy = finite(p.vy) ? p.vy : 0;
+    target.lastCmd = { ...target.lastCmd, jump: p.jumpHeld === true };
   }
   Object.assign(sim, { tick: value.tick, time: value.time, left: value.left, round: value.round,
     phase: value.phase, score: value.score, carrier: value.carrier, bomb: value.bomb,

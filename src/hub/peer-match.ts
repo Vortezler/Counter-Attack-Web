@@ -2,7 +2,13 @@ const publishedHub = "https://kumori1313.github.io";
 const localHubs = ["http://127.0.0.1:5173", "http://127.0.0.1:4175"];
 const maxPacket = 32000;
 
-interface Setup { kind: "ready" | "offer" | "answer" | "relay" | "relay-ready"; from: string; to?: string; sdp?: string }
+interface Setup {
+  kind: "ready" | "offer" | "answer" | "relay" | "relay-ready";
+  from: string;
+  to?: string;
+  sdp?: string;
+  candidates?: RTCIceCandidateInit[];
+}
 interface Launch { host: boolean; hostName: string; peerName: string }
 
 export class PeerMatch {
@@ -21,6 +27,7 @@ export class PeerMatch {
   private relayActive = false;
   private relayTimer = 0;
   private fallbackTimer = 0;
+  private readonly remoteCandidates = new Set<string>();
 
   get relayed() { return this.relayActive; }
   private timeout: number;
@@ -69,15 +76,28 @@ export class PeerMatch {
   private makeConnection() {
     this.connection?.close();
     this.channel = undefined;
+    this.remoteCandidates.clear();
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun.cloudflare.com:3478" },
+      ],
     });
     this.connection = pc;
     pc.onconnectionstatechange = () => {
       if (this.connection !== pc || this.ended) return;
-      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
-        if (this.launch.host && pc.connectionState === "failed") this.requestRelay(this.epoch);
-        else if (!this.relayActive) this.onStatus?.("Peer connection interrupted. Waiting for the host…");
+      if (pc.connectionState === "connected" && this.channel?.readyState === "open") {
+        clearTimeout(this.fallbackTimer);
+        this.onStatus?.("");
+      } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+        this.onStatus?.("Peer connection interrupted. Waiting for the host…");
+        if (this.launch.host && this.opened) {
+          clearTimeout(this.fallbackTimer);
+          const epoch = this.epoch;
+          this.fallbackTimer = window.setTimeout(() => {
+            if (this.connection === pc && pc.connectionState !== "connected") this.requestRelay(epoch);
+          }, 5000);
+        }
       }
     };
     return pc;
@@ -136,49 +156,77 @@ export class PeerMatch {
     }
   }
 
-  private async description(pc: RTCPeerConnection, desc: RTCSessionDescriptionInit) {
-    await pc.setLocalDescription(desc);
-    if (pc.iceGatheringState !== "complete") {
-      await new Promise<void>(resolve => {
-        const done = () => {
-          clearTimeout(timer);
-          pc.removeEventListener("icegatheringstatechange", changed);
-          resolve();
-        };
-        const changed = () => { if (pc.iceGatheringState === "complete") done(); };
-        const timer = window.setTimeout(done, 4000);
-        pc.addEventListener("icegatheringstatechange", changed);
-        changed();
-      });
+  private async sendDescription(
+    pc: RTCPeerConnection, kind: "offer" | "answer", from: string, to: string,
+  ) {
+    const description = kind === "offer" ? await pc.createOffer() : await pc.createAnswer();
+    if (this.connection !== pc || this.ended) return;
+    const candidates: RTCIceCandidateInit[] = [];
+    let published = false;
+    let flushTimer = 0;
+    const publish = () => {
+      flushTimer = 0;
+      if (!published || this.connection !== pc || this.ended) return;
+      this.sendSetup({ kind, from, to, sdp: pc.localDescription?.sdp ?? description.sdp, candidates });
+    };
+    pc.onicecandidate = ({ candidate }) => {
+      if (!candidate || this.connection !== pc || candidates.length >= 24) return;
+      candidates.push(candidate.toJSON());
+      if (!flushTimer) flushTimer = window.setTimeout(publish, 100);
+    };
+    await pc.setLocalDescription(description);
+    published = true;
+    clearTimeout(flushTimer);
+    publish();
+  }
+
+  private async addCandidates(pc: RTCPeerConnection, message: Setup) {
+    if (!Array.isArray(message.candidates)) return;
+    for (const candidate of message.candidates.slice(0, 24)) {
+      if (this.connection !== pc || this.ended) return;
+      if (!candidate || typeof candidate.candidate !== "string"
+        || candidate.candidate.length > 1024) continue;
+      const key = candidate.candidate;
+      if (this.remoteCandidates.has(key) || pc.remoteDescription?.sdp.includes(key)) continue;
+      this.remoteCandidates.add(key);
+      // A network interface may disappear while gathering. Keep processing
+      // the other candidates if this one cannot be added.
+      try { await pc.addIceCandidate(candidate); } catch { /* Unusable candidate. */ }
     }
-    if (this.connection !== pc || this.ended) return undefined;
-    return pc.localDescription?.sdp;
   }
 
   private async receive(message: Setup) {
     if (this.ended) return;
     if (this.launch.host) {
       if (message.from !== this.remote) {
+        if (message.kind !== "ready" && message.kind !== "answer" && message.kind !== "relay-ready") return;
         this.remote = message.from;
         this.epoch = crypto.randomUUID();
         this.relayEpoch = "";
         this.relayActive = false;
         clearTimeout(this.fallbackTimer);
-        this.fallbackTimer = window.setTimeout(() => this.requestRelay(this.epoch), 15000);
+        const epoch = this.epoch;
+        this.fallbackTimer = window.setTimeout(() => this.requestRelay(epoch), 18000);
         const pc = this.makeConnection();
         this.bindChannel(pc.createDataChannel("match"));
-        const sdp = await this.description(pc, await pc.createOffer());
-        if (sdp) this.sendSetup({ kind: "offer", from: this.epoch, to: message.from, sdp });
+        await this.sendDescription(pc, "offer", epoch, message.from);
       } else if (message.kind === "relay-ready" && message.to === this.relayEpoch && this.relayOpen) {
         this.relayActive = true;
         this.activate(this.relayEpoch);
-      } else if (message.kind === "answer" && message.to === this.epoch && message.sdp
-        && this.connection?.signalingState === "have-local-offer") {
-        await this.connection.setRemoteDescription({ type: "answer", sdp: message.sdp });
+      } else if (message.kind === "answer" && message.to === this.epoch && message.sdp && this.connection) {
+        const pc = this.connection;
+        if (pc.signalingState === "have-local-offer") {
+          await pc.setRemoteDescription({ type: "answer", sdp: message.sdp });
+        }
+        await this.addCandidates(pc, message);
       }
     } else if (message.kind === "relay" && message.to === this.epoch) {
       this.requestRelay(message.from);
-    } else if (message.kind === "offer" && message.to === this.epoch && message.sdp && this.remoteOffer !== message.from) {
+    } else if (message.kind === "offer" && message.to === this.epoch && message.sdp) {
+      if (this.remoteOffer === message.from) {
+        if (this.connection) await this.addCandidates(this.connection, message);
+        return;
+      }
       this.remoteOffer = message.from;
       this.relayEpoch = "";
       this.relayActive = false;
@@ -188,8 +236,8 @@ export class PeerMatch {
         else channel.close();
       };
       await pc.setRemoteDescription({ type: "offer", sdp: message.sdp });
-      const sdp = await this.description(pc, await pc.createAnswer());
-      if (sdp) this.sendSetup({ kind: "answer", from: this.epoch, to: message.from, sdp });
+      await this.addCandidates(pc, message);
+      await this.sendDescription(pc, "answer", this.epoch, message.from);
     }
   }
 

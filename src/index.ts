@@ -11,6 +11,7 @@ import type { GameRenderer } from "./render";
 import type { Sim, SimEvent } from "./sim/Sim";
 import { idle, type PlayerCommand } from "./sim/player";
 import { applyFrame, peerPlayer, projectFrame, readCommand, readEvent, record } from "./sim/peer-state";
+import { GuestMotion } from "./sim/guest-motion";
 import { mountTouchControls } from "./touch-controls";
 import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
@@ -97,6 +98,9 @@ export async function createGame(
   let remoteFrame: Record<string, unknown> | undefined;
   let positionReceivedAt = 0;
   let lastInputAt = 0;
+  let lastInput: PlayerCommand | undefined;
+  let acknowledged = { sequence: -1, tick: 0, stream: "" };
+  const guestMotion = network && !host ? new GuestMotion() : undefined;
   const relayEvents: SimEvent[] = [];
   let remoteGrenades: ReturnType<typeof projectFrame>["grenades"] = [];
   let lastSentFrame = -1;
@@ -653,19 +657,27 @@ export async function createGame(
           pitch = 0;
           round = s.round;
         }
-        if (!network || host || !network.relayed || now - lastInputAt >= 100) {
-          const local = paused ? idle(yaw, pitch) : command();
-          if (!network) s.step(opts.botsOnly ? {} : { 0: local });
-          else if (host) {
-            const peer = s.players[peerPlayer];
-            const recent = performance.now() - remoteAt < 400;
-            const remote = recent && remoteCommand ? remoteCommand : idle(peer.yaw, peer.pitch);
-            s.step({ 0: local, [peerPlayer]: { ...remote, buy: remoteBuy, slot: remoteSlot } });
-            remoteBuy = undefined;
-            remoteSlot = undefined;
-          } else {
-            network.send({ type: "input", sequence: ++inputTick, stream: inputStream, command: local });
+        const local = paused ? idle(yaw, pitch) : command();
+        if (!network) s.step(opts.botsOnly ? {} : { 0: local });
+        else if (host) {
+          const peer = s.players[peerPlayer];
+          const recent = performance.now() - remoteAt < 400;
+          const remote = recent && remoteCommand ? remoteCommand : idle(peer.yaw, peer.pitch);
+          if (recent && (acknowledged.sequence !== remoteTick || acknowledged.stream !== remoteStream)) {
+            acknowledged = { sequence: remoteTick, tick: s.tick + 1, stream: remoteStream };
+          }
+          s.step({ 0: local, [peerPlayer]: { ...remote, buy: remoteBuy, slot: remoteSlot } });
+          remoteBuy = undefined;
+          remoteSlot = undefined;
+        } else {
+          const sequence = ++inputTick;
+          if (network.relayed) guestMotion?.advance(s, sequence, local, now);
+          const changed = !lastInput || (["moveX", "moveZ", "jump", "fire", "alt", "walk", "crouch", "use", "reload"] as const)
+            .some(key => local[key] !== lastInput?.[key]) || !!local.slot;
+          if (!network.relayed || now - lastInputAt >= 80 || changed) {
+            network.send({ type: "input", sequence, stream: inputStream, command: local });
             lastInputAt = now;
+            lastInput = local;
           }
         }
         acc -= DT;
@@ -677,8 +689,14 @@ export async function createGame(
     }
     if (host && (s.phase === "finished"
       ? lastSentFrame !== s.tick || now - lastSentAt >= 1000
-      : s.tick - lastSentFrame >= (network?.relayed ? 8 : 4))) {
-      network?.send({ type: "frame", frame: projectFrame(s), events: relayEvents.splice(0) });
+      : s.tick - lastSentFrame >= (network?.relayed ? 5 : 4))) {
+      network?.send({
+        type: "frame",
+        frame: projectFrame(s, network.relayed),
+        ack: { sequence: acknowledged.sequence, stream: acknowledged.stream,
+          age: Math.max(0, s.tick - acknowledged.tick) },
+        events: relayEvents.splice(0),
+      });
       lastSentFrame = s.tick;
       lastSentAt = now;
     }
@@ -690,10 +708,14 @@ export async function createGame(
     const elapsed = Math.min(0.18, (now - prev) / 1000);
     prev = now;
     if (elapsed > 0) frameRate += (1 / elapsed - frameRate) * 0.04;
+    const prediction = network?.relayed ? guestMotion : undefined;
+    if (prediction) prediction.updateCorrection(elapsed);
     if (network && !host && remoteFrame) {
+      const prior = prediction?.capture(s);
       const finished = s.phase === "finished";
       const latest = applyFrame(s, remoteFrame.frame);
       if (latest) {
+        if (prediction && prior) prediction.reconcile(s, prior, remoteFrame.ack, inputStream, now);
         remoteGrenades = latest;
         positionReceivedAt = now;
         if (Array.isArray(remoteFrame.events)) {
@@ -718,12 +740,13 @@ export async function createGame(
               Math.hypot(b.x - me.x, b.z - me.z),
           )[0] ?? me);
     const alpha = Math.max(0, Math.min(1, network && !host && positionReceivedAt
-      ? (now - positionReceivedAt) / (network.relayed ? 125 : 62.5)
+      ? (now - positionReceivedAt) / (network.relayed ? 78.125 : 62.5)
       : acc / DT)),
       lerp = (a: number, b: number) => a + (b - a) * alpha;
-    const x = lerp(watched.last.x, watched.x),
-      z = lerp(watched.last.z, watched.z);
-    const eyeTarget = watched.eye.y;
+    const predicted = watched === me && me.alive ? prediction?.position(s) : undefined;
+    const x = predicted?.x ?? lerp(watched.last.x, watched.x),
+      z = predicted?.z ?? lerp(watched.last.z, watched.z);
+    const eyeTarget = watched.eye.y + (predicted ? predicted.y - watched.y : 0);
     if (!aimEye || Math.abs(aimEye - eyeTarget) > 1.5) aimEye = eyeTarget;
     else
       aimEye +=

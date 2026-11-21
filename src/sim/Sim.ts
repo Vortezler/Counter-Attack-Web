@@ -518,7 +518,7 @@ export class Sim {
       }
     }
   }
-  move(p: Player, c: PlayerCommand) {
+  move(p: Player, c: PlayerCommand, emitSteps = true) {
     const speed =
       (p.scoped ? 100 : isGun(p.weapon) ? catalog[p.weapon].speed : 245) *
       U *
@@ -554,7 +554,7 @@ export class Sim {
         p.vx *= k;
         p.vz *= k;
       }
-      if (!c.walk && !c.crouch) {
+      if (emitSteps && !c.walk && !c.crouch) {
         p.stepDist += distance(p, p.last);
         if (p.stepDist > 2.15) {
           p.stepDist = 0;

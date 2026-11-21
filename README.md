@@ -57,7 +57,7 @@ Set the repository's Pages source to **GitHub Actions**. The **Deploy GitHub Pag
 
 Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, and wait for the creator to start it. Both players then select **Open match**. The creator plays CT and runs the simulation, and the guest plays T. Eight bots fill the remaining slots on Dust2 with normal difficulty. The existing solo menu includes both maps and difficulty settings.
 
-The match opens inside the Game Hub tab. Gameplay prefers direct WebRTC and falls back to private Game Hub Realtime messages when a direct link fails. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
+The match opens inside the Game Hub tab. Browsers share connection candidates while establishing direct WebRTC and use private Game Hub Realtime messages if a direct path is unavailable. On the relay, the guest sees local movement immediately and adjusts to the host's snapshots. The host resolves damage, purchases, and round outcomes over either connection. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
 
 On a touch device, use the on-screen buttons to move and act and drag the view to aim. Keep the host tab active on mobile because the browser can suspend it in the background. The host controls this casual match, so play with someone you trust.
 
