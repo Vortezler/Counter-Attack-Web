@@ -20,7 +20,11 @@ async function openPeerMatch(launch: Promise<PeerMatch>) {
     let game: Awaited<ReturnType<typeof createGame>> | undefined;
     let ended = false;
     let generation = 0;
-    back.addEventListener("click", () => { peer.close(true); game?.destroy(); });
+    back.addEventListener("click", event => {
+      if (window.parent !== window) event.preventDefault();
+      peer.close(true);
+      game?.destroy();
+    });
     peer.onStatus = message => {
       panel.hidden = !message;
       status.textContent = message;
@@ -36,7 +40,7 @@ async function openPeerMatch(launch: Promise<PeerMatch>) {
       game?.destroy();
       const mounted = await createGame(root, {
         peer, autostart: true, playerName: peer.launch.host ? peer.launch.hostName : peer.launch.peerName,
-        onExit: () => location.assign(back.href),
+        onExit: () => { if (window.parent === window) location.assign(back.href); },
       });
       if (ended || current !== generation) mounted.destroy();
       else game = mounted;

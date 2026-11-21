@@ -57,9 +57,9 @@ Set the repository's Pages source to **GitHub Actions**. The **Deploy GitHub Pag
 
 Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, and wait for the creator to start it. Both players then select **Open match**. The creator plays CT and runs the simulation, and the guest plays T. Eight bots fill the remaining slots on Dust2 with normal difficulty. The existing solo menu includes both maps and difficulty settings.
 
-Leave the Game Hub lobby tab open and keep the host game tab visible. Gameplay uses a direct WebRTC data channel. Game Hub provides room admission and exchanges offers and answers through its own tab. If the guest reloads, they can reconnect to the host’s current match. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
+The match opens inside the Game Hub tab. Gameplay prefers direct WebRTC and falls back to private Game Hub Realtime messages when a direct link fails. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
 
-Some networks block direct connections. There is no relay server. The host controls this casual match, so play with someone you trust.
+On a touch device, use the on-screen buttons to move and act and drag the view to aim. Keep the host tab active on mobile because the browser can suspend it in the background. The host controls this casual match, so play with someone you trust.
 
 
 The standalone build works with no backend configuration. For guest restoration, copy `.env.example` to `.env.local` and set the same browser-safe Supabase URL and publishable key as Game Hub. Serve the two applications on the same origin for shared guest storage. The game stores local preferences under `cs-web:` and signs in no new users.

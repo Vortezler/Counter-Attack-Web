@@ -9,6 +9,8 @@ export interface RenderActor extends Vec3 {
   alive: boolean;
   crouched?: boolean;
   moving?: boolean;
+  pitch?: number;
+  weapon?: string;
   last?: Vec3;
 }
 export interface RenderFrame {
@@ -327,6 +329,42 @@ function heldWeapon(id: string) {
   );
   return rig;
 }
+function flatten(group: THREE.Group) {
+  const gs: THREE.BufferGeometry[] = [];
+  for (const obj of [...group.children]) {
+    if (!(obj instanceof THREE.Mesh)) continue;
+    obj.updateMatrix();
+    const g = obj.geometry.index
+      ? obj.geometry.toNonIndexed()
+      : obj.geometry.clone();
+    g.applyMatrix4(obj.matrix);
+    const n = g.getAttribute("position").count,
+      c = obj.material.color,
+      colors = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+    gs.push(g);
+    obj.geometry.dispose();
+    obj.material.dispose();
+    group.remove(obj);
+  }
+  const geo = mergeGeometries(gs, false);
+  gs.forEach((g) => g.dispose());
+  if (geo) {
+    const m = new THREE.Mesh(
+      geo,
+      new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
+    );
+    m.castShadow = true;
+    m.receiveShadow = true;
+    group.add(m);
+  }
+}
+
 function humanoid(team: Team) {
   const root = new THREE.Group(),
     ct = team === "CT",
@@ -395,47 +433,12 @@ function humanoid(team: Team) {
     );
     forearm.rotation.y = side * 0.3;
   }
-  part(root, 0.087, 0.095, 0.47, dark, 0.13, 1.105, -0.26);
-  barrel(root, 0.02, 0.25, matte, 0.13, 1.12, -0.6);
-  // One draw per rigid body group preserves the leg animation while keeping the bot budget low.
-  function flatten(group: THREE.Group) {
-    const gs: THREE.BufferGeometry[] = [];
-    for (const obj of [...group.children]) {
-      if (!(obj instanceof THREE.Mesh)) continue;
-      obj.updateMatrix();
-      const g = obj.geometry.index
-        ? obj.geometry.toNonIndexed()
-        : obj.geometry.clone();
-      g.applyMatrix4(obj.matrix);
-      const n = g.getAttribute("position").count,
-        c = obj.material.color,
-        colors = new Float32Array(n * 3);
-      for (let i = 0; i < n; i++) {
-        colors[i * 3] = c.r;
-        colors[i * 3 + 1] = c.g;
-        colors[i * 3 + 2] = c.b;
-      }
-      g.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-      gs.push(g);
-      obj.geometry.dispose();
-      obj.material.dispose();
-      group.remove(obj);
-    }
-    const geo = mergeGeometries(gs, false);
-    gs.forEach((g) => g.dispose());
-    if (geo) {
-      const m = new THREE.Mesh(
-        geo,
-        new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9 }),
-      );
-      m.castShadow = true;
-      m.receiveShadow = true;
-      group.add(m);
-    }
-  }
+  const held = new THREE.Group();
+  root.add(held);
+  held.position.set(0.13, 1.105, -0.31);
   legs.forEach(flatten);
   flatten(root);
-  return { root, legs, team };
+  return { root, legs, team, held, item: "" };
 }
 function seeded(initial: number) {
   let n = initial;
@@ -1602,6 +1605,16 @@ export class GameRenderer {
         this.scene.add(model.root);
       }
       model.root.visible = p.alive && p.id !== f.viewId;
+      const weapon = p.weapon ?? "glock";
+      if (model.root.visible && model.item !== weapon) {
+        releaseTree(model.held);
+        model.held.clear();
+        const item = gun(weapon);
+        flatten(item);
+        model.held.add(item);
+        model.item = weapon;
+      }
+      model.held.rotation.x = p.pitch ?? 0;
       const last = p.last ?? p,
         alpha = f.alpha ?? 1;
       model.root.position.set(

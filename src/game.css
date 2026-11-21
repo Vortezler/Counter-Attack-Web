@@ -436,3 +436,30 @@ body {
   border: 1px solid #68785e;
 }
 .csw-peer-status a { color: #daf39a; }
+
+.csw-touch-game > canvas, .csw-touch button { touch-action: none; }
+.csw-touch {
+  position: absolute;
+  inset: auto 10px 60px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  user-select: none;
+}
+.csw-touch > div {
+  display: grid;
+  gap: 4px;
+  grid-template-columns: repeat(2, minmax(42px, 1fr));
+  align-content: end;
+}
+.csw-touch button {
+  pointer-events: auto;
+  min-height: 42px;
+  color: #f3f6e9;
+  background: #171b17d9;
+  border: 1px solid #68785e;
+  border-radius: 4px;
+  font: inherit;
+}
