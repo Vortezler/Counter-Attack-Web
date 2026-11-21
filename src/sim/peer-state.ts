@@ -1,10 +1,10 @@
 import { catalog, isGun, isNade, shop, type Magazine, type Weapon } from "../config/weapons";
-import type { Sim, SimEvent } from "./Sim";
+import type { Fire, Sim, SimEvent, Smoke } from "./Sim";
 import type { PlayerCommand } from "./player";
 
 export const peerPlayer = 5;
 const numeric = ["x", "y", "z", "vx", "vz", "yaw", "pitch", "hp", "armor", "money", "kills",
-  "deaths", "he", "flash", "scoped", "lastFire", "reloadEnd", "punchX", "punchY",
+  "deaths", "he", "flash", "smoke", "molly", "scoped", "lastFire", "reloadEnd", "punchX", "punchY",
   "blinded", "blindDuration", "spotted"] as const;
 const flags = ["kit", "helmet", "ground"] as const;
 const commandFlags = ["fire", "alt", "jump", "crouch", "walk", "use", "reload"] as const;
@@ -46,6 +46,10 @@ export function projectFrame(sim: Sim, compact = false) {
     score: sim.score, result: sim.result, carrier: sim.carrier, bomb: sim.bomb,
     plantedSite: sim.plantedSite, action: sim.action, worker: sim.worker, work: sim.work,
     grenades: sim.grenades.map(g => ({ ...g.body.translation(), id: g.id, type: g.type })),
+    smokes: sim.smokes.map(c => ({ id: c.id, x: number(c.x), y: number(c.y), z: number(c.z), r: c.r,
+      born: c.born, until: c.until })),
+    fires: sim.fires.map(f => ({ id: f.id, x: number(f.x), y: number(f.y), z: number(f.z), r: f.r,
+      born: f.born, until: f.until, owner: f.owner, team: f.team })),
     players: sim.players.map(p => ({
       ...Object.fromEntries(numeric.map(k => [k, number(p[k])])),
       ...Object.fromEntries(flags.map(k => [k, p[k]])),
@@ -53,6 +57,27 @@ export function projectFrame(sim: Sim, compact = false) {
       vy: number(p.vy), jumpHeld: !!p.lastCmd.jump,
     })),
   };
+}
+
+/** Smoke clouds and fires are display-only on the guest; the host still owns vision and damage. */
+type Area = Payload & { id: number; x: number; y: number; z: number; r: number; born: number; until: number };
+function area(value: unknown): value is Area {
+  return record(value) && finite(value.id) && finite(value.x, 10000) && finite(value.y, 10000)
+    && finite(value.z, 10000) && finite(value.r, 10) && finite(value.born) && finite(value.until);
+}
+function readSmokes(value: unknown): Smoke[] | null {
+  if (!Array.isArray(value) || value.length > 40 || !value.every(area)) return null;
+  return value.map(c => ({ id: c.id, x: c.x, y: c.y, z: c.z, r: c.r, born: c.born, until: c.until }));
+}
+function readFires(value: unknown): Fire[] | null {
+  if (!Array.isArray(value) || value.length > 40) return null;
+  const fires: Fire[] = [];
+  for (const f of value) {
+    if (!area(f) || !finite(f.owner, 9) || (f.team !== "CT" && f.team !== "T")) return null;
+    fires.push({ id: f.id, x: f.x, y: f.y, z: f.z, r: f.r, born: f.born, until: f.until,
+      owner: f.owner, team: f.team, next: Infinity });
+  }
+  return fires;
 }
 
 function magazine(value: unknown): value is Magazine {
@@ -72,6 +97,10 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
     || !finite(value.worker, 9) || !finite(value.work, 30)
     || !Array.isArray(value.players) || value.players.length !== sim.players.length
     || !Array.isArray(value.grenades) || value.grenades.length > 100) return null;
+  // Frames from a host without utility sync carry no smokes or fires; treat them as empty.
+  const smokes = value.smokes === undefined ? [] : readSmokes(value.smokes);
+  const fires = value.fires === undefined ? [] : readFires(value.fires);
+  if (!smokes || !fires) return null;
   const players: Payload[] = value.players;
   for (const p of players) {
     if (!record(p) || !numeric.every(key => finite(p[key])) || !flags.every(key => typeof p[key] === "boolean")
@@ -98,6 +127,8 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
     target.vy = finite(p.vy) ? p.vy : 0;
     target.lastCmd = { ...target.lastCmd, jump: p.jumpHeld === true };
   }
+  sim.smokes = smokes;
+  sim.fires = fires;
   Object.assign(sim, { tick: value.tick, time: value.time, left: value.left, round: value.round,
     phase: value.phase, score: value.score, carrier: value.carrier, bomb: value.bomb,
     worker: value.worker, work: value.work, action: value.action, plantedSite: value.plantedSite });
@@ -110,7 +141,8 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
 
 export function readEvent(value: unknown): SimEvent | null {
   if (!record(value) || typeof value.type !== "string" ||
-      !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step"].includes(value.type)) return null;
+      !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step",
+        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce"].includes(value.type)) return null;
   const event: SimEvent = { type: value.type };
   for (const key of ["actor", "victim"] as const) {
     const index = value[key];
@@ -125,5 +157,8 @@ export function readEvent(value: unknown): SimEvent | null {
   if (typeof value.message === "string") event.message = value.message.slice(0, 100);
   if (finite(value.amount, 1000)) event.amount = value.amount;
   if (value.wallbang === true) event.wallbang = true;
+  if (value.head === true) event.head = true;
+  const dir = value.dir;
+  if (record(dir) && finite(dir.x, 1) && finite(dir.z, 1)) event.dir = { x: dir.x, z: dir.z };
   return event;
 }
