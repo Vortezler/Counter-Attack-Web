@@ -1,0 +1,884 @@
+import type { MapDef, Team, Vec3 } from "../world";
+import type { RigidBody } from "@dimforge/rapier3d-compat";
+import {
+  catalog,
+  gear,
+  isGun,
+  magazine,
+  shop,
+  weaponName,
+  type Item,
+  type Gun,
+  type Weapon,
+} from "../config/weapons";
+import { patterns } from "../config/recoilPatterns";
+import { Physics } from "./Physics";
+import { Player, idle, type PlayerCommand } from "./player";
+import {
+  U,
+  DT,
+  DEG,
+  GRAVITY,
+  JUMP,
+  capMoney,
+  lossPay,
+  seeded,
+  clamp,
+  velocity,
+  penetrate,
+  damage,
+  nearest,
+  type Group,
+} from "./rules";
+import { botCommand } from "./bots";
+export type Difficulty = "easy" | "normal" | "hard";
+type Phase = "warmup" | "freeze" | "live" | "planted" | "ended" | "finished";
+export interface SimEvent {
+  type: string;
+  actor?: number;
+  victim?: number;
+  weapon?: Weapon;
+  pos?: Vec3;
+  end?: Vec3;
+  normal?: Vec3;
+  message?: string;
+  amount?: number;
+  wallbang?: boolean;
+  head?: boolean;
+}
+interface Grenade {
+  id: number;
+  type: "he" | "flash";
+  owner: number;
+  body: RigidBody;
+  expires: number;
+  lastVy: number;
+}
+export const inside = (
+  p: Vec3,
+  r: { x: number; z: number; w: number; d: number; y: number },
+) =>
+  Math.abs(p.x - r.x) <= r.w / 2 &&
+  Math.abs(p.z - r.z) <= r.d / 2 &&
+  Math.abs(p.y - r.y) < 3;
+export const distance = (
+  a: { x: number; z: number },
+  b: { x: number; z: number },
+) => Math.hypot(a.x - b.x, a.z - b.z);
+const advance = (p: Vec3, d: Vec3, len: number) => ({
+  x: p.x + d.x * len,
+  y: p.y + d.y * len,
+  z: p.z + d.z * len,
+});
+const other = (t: Team): Team => (t === "T" ? "CT" : "T");
+export class Sim {
+  physics: Physics;
+  players: Player[] = [];
+  rng: () => number;
+  time = 0;
+  tick = 0;
+  phase: Phase = "warmup";
+  left = 3;
+  round = 1;
+  score = { CT: 0, T: 0 };
+  losses = { CT: 0, T: 0 };
+  result = "";
+  carrier = -1;
+  bomb: Vec3 | null = null;
+  plantedSite = "";
+  work = 0;
+  worker = -1;
+  action = "";
+  grenades: Grenade[] = [];
+  nextGrenade = 0;
+  lastBeep = 0;
+  traceInfo = "";
+  listeners = new Set<(e: SimEvent) => void>();
+  constructor(
+    public map: MapDef,
+    side: Team = "CT",
+    public difficulty: Difficulty = "normal",
+    name = "Player",
+    seed = 17,
+    public botsOnly = false,
+  ) {
+    this.rng = seeded(seed);
+    this.physics = new Physics(map);
+    const names = [
+      "",
+      "Rook",
+      "Vector",
+      "Sable",
+      "Flint",
+      "Atlas",
+      "Vale",
+      "Mako",
+      "Echo",
+      "Slate",
+    ];
+    for (let i = 0; i < (map.id === "range" ? 4 : 10); i++) {
+      const team = i < (map.id === "range" ? 1 : 5) ? side : other(side);
+      const spawn = map.spawns[team][i % map.spawns[team].length];
+      this.players.push(
+        new Player(
+          i,
+          i === 0 ? name : names[i],
+          team,
+          this.physics.createPlayer(i, spawn),
+        ),
+      );
+    }
+    this.startRound(true);
+    if (map.id === "range") {
+      this.phase = "live";
+      this.left = Infinity;
+      this.players[0].money = 16000;
+    } else {
+      this.phase = "warmup";
+      this.left = 3;
+    }
+  }
+  get me() {
+    return this.players[0];
+  }
+  onEvent(cb: (e: SimEvent) => void) {
+    this.listeners.add(cb);
+    return () => this.listeners.delete(cb);
+  }
+  emit(e: SimEvent) {
+    for (const cb of this.listeners) cb(e);
+  }
+  startRound(fresh = false) {
+    for (const g of this.grenades) this.physics.world.removeRigidBody(g.body);
+    this.grenades = [];
+    this.bomb = null;
+    this.plantedSite = "";
+    this.worker = -1;
+    this.work = 0;
+    this.action = "";
+    this.phase = "freeze";
+    this.left = 15;
+    const orders = { CT: 0, T: 0 };
+    const main = this.rng() < 0.5 ? "A" : "B";
+    for (const p of this.players) {
+      const idx = orders[p.team]++;
+      const arr =
+        this.map.id === "range"
+          ? this.map.spawns[p.id === 0 ? "CT" : "T"]
+          : this.map.spawns[p.team];
+      const pos = arr[idx % arr.length];
+      p.respawn(pos, fresh);
+      this.physics.enable(p.body, true);
+      p.body.crouch = false;
+      p.body.collider.setHalfHeight(20 * U);
+      this.physics.place(p.body, p, p.yaw);
+      p.patrol =
+        p.team === "CT"
+          ? idx % 2
+            ? "B"
+            : "A"
+          : idx === 4
+            ? main === "A"
+              ? "B"
+              : "A"
+            : main;
+      if (p.team === "T" && this.map.id !== "range") {
+        const via =
+          p.patrol === "B"
+            ? this.map.id === "dust2"
+              ? "Upper Tunnels"
+              : "Apartments"
+            : idx % 3 === 1
+              ? this.map.id === "dust2"
+                ? "Short A"
+                : "Connector"
+              : this.map.id === "dust2"
+                ? "Long Doors"
+                : "Palace";
+        p.staging = this.map.callouts.find((n) => n.name === via) ?? null;
+      } else p.staging = null;
+    }
+    const ts = this.players.filter((p) => p.team === "T");
+    this.carrier = ts[0]?.id ?? -1;
+    for (const p of this.players)
+      if (
+        this.map.id !== "range" &&
+        (p.id || this.botsOnly) &&
+        !(this.round === 1 && fresh)
+      )
+        this.botBuy(p);
+    this.physics.world.step();
+    this.emit({ type: "roundStart" });
+  }
+  botBuy(p: Player) {
+    if (p.money < 2000 && this.losses[p.team]) return;
+    for (const item of [
+      "helmet",
+      ...(p.primary
+        ? []
+        : [this.rng() < 0.15 ? "awp" : "", p.team === "T" ? "ak" : "m4"]),
+      "kevlar",
+      ...(!p.primary ? ["deagle"] : []),
+      "kit",
+      "he",
+      "flash",
+    ] as Item[]) {
+      if (
+        item &&
+        this.buy(p, item) === "Purchased" &&
+        isGun(item) &&
+        catalog[item].slot === 1
+      )
+        p.weapon = item;
+    }
+    if (p.primary) p.weapon = p.primary.id;
+  }
+  canBuy(p: Player) {
+    return (
+      p.alive &&
+      (this.map.id === "range" ||
+        ((this.phase === "freeze" ||
+          (this.phase === "live" && this.left >= 95)) &&
+          inside(p, this.map.buyZones[p.team])))
+    );
+  }
+  buy(p: Player, item: Item): string {
+    if (!Object.hasOwn(shop, item) || !this.canBuy(p))
+      return "Buy time or spawn zone required";
+    const g = isGun(item) ? catalog[item] : null;
+    if ((g?.team && g.team !== p.team) || (item === "kit" && p.team !== "CT"))
+      return "Other team only";
+    if (
+      (g && (p.primary?.id === item || p.pistol.id === item)) ||
+      (item === "he" && p.he >= 1) ||
+      (item === "flash" && p.flash >= 2) ||
+      (item === "kit" && p.kit) ||
+      (item === "kevlar" && p.armor >= 100) ||
+      (item === "helmet" && p.armor >= 100 && p.helmet)
+    )
+      return "Already equipped";
+    const cost = shop[item].price;
+    if (p.money < cost) return "Insufficient funds";
+    p.money -= cost;
+    if (isGun(item)) {
+      const mag = magazine(item);
+      if (catalog[item].slot === 1) p.primary = mag;
+      else p.pistol = mag;
+      this.equip(p, item);
+    } else if (item === "he" || item === "flash") p[item]++;
+    else if (item === "kit") p.kit = true;
+    else {
+      p.armor = 100;
+      if (item === "helmet") p.helmet = true;
+    }
+    return "Purchased";
+  }
+  equip(p: Player, w: Weapon) {
+    if (w === p.weapon) return;
+    p.previous = p.weapon;
+    p.weapon = w;
+    p.scoped = 0;
+    p.reloadEnd = 0;
+    p.windup = 0;
+    p.index = p.punchX = p.punchY = p.penalty = 0;
+    p.drawEnd =
+      this.time + (isGun(w) ? (catalog[w].slot === 1 ? 0.5 : 0.4) : 0.7);
+  }
+  switch(p: Player, slot: number) {
+    const items: Weapon[] = [
+      ...(p.primary ? [p.primary.id] : []),
+      p.pistol.id,
+      ...(p.he ? ["he" as const] : []),
+      ...(p.flash ? ["flash" as const] : []),
+      ...(this.carrier === p.id ? ["bomb" as const] : []),
+    ];
+    const selected =
+      slot === 1
+        ? p.primary?.id
+        : slot === 2
+          ? p.pistol.id
+          : slot === 4
+            ? p.weapon === "he" && p.flash
+              ? "flash"
+              : p.he
+                ? "he"
+                : p.flash
+                  ? "flash"
+                  : undefined
+            : slot === 5 && this.carrier === p.id
+              ? "bomb"
+              : slot === -1 && items.includes(p.previous)
+                ? p.previous
+                : slot === 9 || slot === -9
+                  ? items[
+                      (items.indexOf(p.weapon) +
+                        (slot === 9 ? 1 : -1) +
+                        items.length) %
+                        items.length
+                    ]
+                  : undefined;
+    if (selected) this.equip(p, selected);
+  }
+  siteAt(p: Vec3) {
+    return inside(p, this.map.sites.A)
+      ? "A"
+      : inside(p, this.map.sites.B)
+        ? "B"
+        : "";
+  }
+  objective(p: Player) {
+    if (this.phase === "live" && p.id === this.carrier && this.siteAt(p))
+      return "Plant";
+    if (
+      this.phase === "planted" &&
+      p.team === "CT" &&
+      this.bomb &&
+      distance(p, this.bomb) < 2.2 &&
+      Math.abs(this.bomb.y - p.y) < 2
+    )
+      return "Defuse";
+    return "";
+  }
+  step(commands: Record<number, PlayerCommand> = {}) {
+    if (this.phase === "finished") return;
+    this.tick++;
+    this.time += DT;
+    this.left -= DT;
+    if (this.phase === "warmup" && this.left <= 0) {
+      this.phase = "freeze";
+      this.left = 15;
+      for (const p of this.players) if (p.id || this.botsOnly) this.botBuy(p);
+    }
+    if (this.phase === "ended") {
+      if (this.left <= 0) {
+        if (Math.max(this.score.CT, this.score.T) >= 13 || this.round >= 24) {
+          this.phase = "finished";
+          this.result =
+            this.score.CT === this.score.T
+              ? "Match tied"
+              : this.score[this.me.team] > this.score[other(this.me.team)]
+                ? "Match victory"
+                : "Match defeat";
+          this.emit({ type: "matchEnd", message: this.result });
+          return;
+        }
+        this.round++;
+        if (this.round === 13) {
+          [this.score.CT, this.score.T] = [this.score.T, this.score.CT];
+          this.losses = { CT: 0, T: 0 };
+          for (const p of this.players) {
+            p.team = other(p.team);
+            p.money = 800;
+          }
+          this.startRound(true);
+        } else this.startRound();
+      }
+      return;
+    }
+    if (this.phase === "freeze" && this.left <= 0) {
+      this.phase = "live";
+      this.left = 115;
+      this.emit({ type: "live" });
+    }
+    const active = this.phase === "live" || this.phase === "planted";
+    let acting = -1;
+    for (const p of this.players) {
+      if (!p.alive) continue;
+      const bot = p.id !== 0 || this.botsOnly;
+      const cmd =
+        commands[p.id] ??
+        (bot && active && this.map.id !== "range"
+          ? botCommand(this, p)
+          : idle(p.yaw, p.pitch));
+      p.last.x = p.x;
+      p.last.y = p.y;
+      p.last.z = p.z;
+      p.yaw = cmd.yaw;
+      p.pitch = clamp(cmd.pitch, -1.553, 1.553);
+      if (cmd.buy && Object.hasOwn(shop, cmd.buy)) this.buy(p, cmd.buy as Item);
+      if (cmd.slot) this.switch(p, cmd.slot);
+      if (active) this.move(p, cmd);
+      if (p.reloadEnd && this.time >= p.reloadEnd) {
+        const m = p.mag;
+        if (m) {
+          const amount = Math.min(m.reserve, catalog[m.id].mag - m.ammo);
+          m.ammo += amount;
+          m.reserve -= amount;
+        }
+        p.reloadEnd = 0;
+      }
+      if (
+        cmd.reload &&
+        !p.reloadEnd &&
+        p.mag &&
+        p.mag.ammo < catalog[p.mag.id].mag &&
+        p.mag.reserve
+      ) {
+        p.reloadEnd = this.time + catalog[p.mag.id].reload;
+        p.scoped = 0;
+        this.emit({ type: "reload", actor: p.id, pos: p.eye });
+      }
+      if (
+        active &&
+        p.team === "T" &&
+        this.phase === "live" &&
+        this.bomb &&
+        this.carrier < 0 &&
+        distance(p, this.bomb) < 1.2 &&
+        Math.abs(p.y - this.bomb.y) < 2
+      ) {
+        this.carrier = p.id;
+        this.bomb = null;
+      }
+      const action = active && cmd.use && this.objective(p);
+      if (
+        action &&
+        (this.worker === p.id || acting === -1) &&
+        (this.worker === -1 || this.worker === p.id)
+      ) {
+        acting = p.id;
+        this.worker = p.id;
+        this.action = action;
+        this.work += DT;
+        if (this.work >= (action === "Plant" ? 3.2 : p.kit ? 5 : 10)) {
+          if (action === "Plant") {
+            this.bomb = { x: p.x, y: p.y + 0.1, z: p.z };
+            this.carrier = -1;
+            this.phase = "planted";
+            this.plantedSite = this.siteAt(p);
+            this.left = 40;
+            this.lastBeep = this.time;
+            for (const a of this.players)
+              if (a.team === "T") a.money = capMoney(a.money + 800);
+            if (p.weapon === "bomb") this.equip(p, p.pistol.id);
+            this.emit({
+              type: "plant",
+              actor: p.id,
+              message: "Bomb planted at " + this.plantedSite,
+            });
+          } else {
+            p.money = capMoney(p.money + 300);
+            this.finish("CT", "Bomb defused");
+          }
+          acting = -1;
+          this.worker = -1;
+          this.work = 0;
+          this.action = "";
+        }
+      }
+      if (active && !action) this.operateWeapon(p, cmd);
+      this.recover(p);
+      p.lastCmd = cmd;
+    }
+    if (acting < 0) {
+      this.worker = -1;
+      this.action = "";
+      this.work = 0;
+    }
+    this.physics.world.step();
+    this.stepGrenades();
+    if (this.map.id === "range") {
+      for (const p of this.players)
+        if (!p.alive && this.time >= p.nextFire) {
+          const spawns = this.map.spawns[p.id === 0 ? "CT" : "T"];
+          p.respawn(spawns[Math.max(0, p.id - 1) % spawns.length], true);
+          this.physics.enable(p.body, true);
+          this.physics.place(p.body, p, p.yaw);
+        }
+      return;
+    }
+    if (
+      this.phase === "planted" &&
+      this.time - this.lastBeep > clamp(this.left / 35, 0.14, 1)
+    ) {
+      this.emit({ type: "beep", pos: this.bomb! });
+      this.lastBeep = this.time;
+    }
+    if (this.phase === "live" || this.phase === "planted") {
+      if (!this.players.some((p) => p.team === "CT" && p.alive))
+        this.finish("T", "Defenders eliminated");
+      else if (
+        this.phase === "live" &&
+        !this.players.some((p) => p.team === "T" && p.alive)
+      )
+        this.finish("CT", "Attackers eliminated");
+      else if (this.left <= 0) {
+        if (this.phase === "planted") {
+          this.emit({ type: "explosion", pos: this.bomb! });
+          for (const p of this.players)
+            if (p.alive) {
+              const d = distance(p, this.bomb!);
+              if (d < 25)
+                this.hurt(p, Math.round(300 * (1 - d / 25) ** 2), null, "bomb");
+            }
+          this.finish("T", "Bomb detonated");
+        } else this.finish("CT", "Time expired");
+      }
+    }
+  }
+  move(p: Player, c: PlayerCommand) {
+    const speed =
+      (p.scoped ? 100 : isGun(p.weapon) ? catalog[p.weapon].speed : 245) *
+      U *
+      (c.crouch ? 0.34 : c.walk ? 0.52 : 1);
+    const sync = p.ground;
+    const sin = Math.sin(c.yaw),
+      cos = Math.cos(c.yaw);
+    [p.vx, p.vz] = velocity(
+      p.vx,
+      p.vz,
+      c.moveX * cos + c.moveZ * sin,
+      c.moveX * sin - c.moveZ * cos,
+      speed,
+      p.ground,
+    );
+    if (c.jump && !p.lastCmd.jump && p.ground) {
+      p.vy = JUMP;
+      p.ground = false;
+    }
+    p.vy -= GRAVITY * DT;
+    const dx = p.vx * DT,
+      dz = p.vz * DT;
+    p.ground = this.physics.move(p.body, p, p.yaw, !!c.crouch, {
+      x: dx,
+      y: p.vy * DT,
+      z: dz,
+    });
+    if (p.ground) {
+      p.vy = 0;
+      if (!sync) {
+        p.landing = this.time;
+        const k = Math.min(1, (1.1 * speed) / (Math.hypot(p.vx, p.vz) || 1));
+        p.vx *= k;
+        p.vz *= k;
+      }
+      if (!c.walk && !c.crouch) {
+        p.stepDist += distance(p, p.last);
+        if (p.stepDist > 2.15) {
+          p.stepDist = 0;
+          this.emit({ type: "step", actor: p.id, pos: p.eye });
+          this.hear(p, 17);
+        }
+      }
+    }
+  }
+  hear(source: Player, radius: number) {
+    for (const p of this.players)
+      if (p.alive && p.team !== source.team && distance(p, source) < radius)
+        p.heard = { x: source.x, y: source.y, z: source.z };
+  }
+  recover(p: Player) {
+    p.penalty *= Math.exp(-DT * 5);
+    const pattern = isGun(p.weapon) ? patterns[p.weapon] : [[0, 0]];
+    const recent =
+      isGun(p.weapon) && this.time - p.lastFire < catalog[p.weapon].reset;
+    if (!recent) p.index = 0;
+    const target = recent
+        ? pattern[Math.min(p.index, pattern.length - 1)]
+        : [0, 0],
+      k = 1 - Math.exp(-DT * (recent ? 35 : 6));
+    p.punchX += (target[0] - p.punchX) * k;
+    p.punchY += (target[1] - p.punchY) * k;
+  }
+  spread(p: Player, g: Gun) {
+    const w = catalog[g],
+      s = w.spread;
+    const base = p.scoped ? 0 : p.crouched ? s[1] : s[0];
+    const speed = clamp(
+      (Math.hypot(p.vx, p.vz) / (w.speed * U) - 0.34) / 0.66,
+      0,
+      1,
+    );
+    return (
+      (p.ground && this.time - p.landing > 0.1
+        ? base + (s[2] - base) * speed
+        : s[3]) + p.penalty
+    );
+  }
+  operateWeapon(p: Player, c: PlayerCommand) {
+    if (p.drawEnd > this.time || p.reloadEnd) return;
+    if (p.weapon === "he" || p.weapon === "flash") {
+      if ((c.fire || c.alt) && !p.windup) p.windup = this.time;
+      if (p.windup && !c.fire && !c.alt) {
+        if (this.time - p.windup >= 0.3)
+          this.throwGrenade(
+            p,
+            p.weapon,
+            p.lastCmd.alt ? (p.lastCmd.fire ? 540 : 330) : 750,
+          );
+        p.windup = 0;
+      }
+      return;
+    }
+    if (!isGun(p.weapon)) return;
+    if (
+      p.weapon === "awp" &&
+      c.alt &&
+      !p.lastCmd.alt &&
+      this.time - p.lastFire > 0.15
+    )
+      p.scoped = (p.scoped + 1) % 3;
+    const m = p.mag;
+    if (!m || !c.fire || this.time < p.nextFire || m.ammo <= 0) return;
+    if (
+      (p.weapon === "glock" || p.weapon === "deagle" || p.weapon === "awp") &&
+      p.lastCmd.fire
+    )
+      return;
+    const w = catalog[p.weapon];
+    m.ammo--;
+    p.nextFire = Math.max(this.time - DT, p.nextFire) + 60 / w.rpm;
+    this.shoot(p, p.weapon);
+    p.lastFire = this.time;
+    p.index++;
+    p.penalty += w.spread[4];
+    p.scoped = 0;
+  }
+  shoot(p: Player, g: Gun) {
+    const spread = this.spread(p, g) * DEG * Math.sqrt(this.rng()),
+      angle = this.rng() * 2 * Math.PI;
+    const yaw = p.yaw + 2 * p.punchY * DEG + spread * Math.cos(angle),
+      pitch = p.pitch + 2 * p.punchX * DEG + spread * Math.sin(angle);
+    const dir = {
+      x: Math.sin(yaw) * Math.cos(pitch),
+      y: Math.sin(pitch),
+      z: -Math.cos(yaw) * Math.cos(pitch),
+    };
+    let o = p.eye,
+      travel = 0,
+      power: number = catalog[g].damage,
+      walls = 0;
+    const max = (g === "glock" ? 4096 : 8192) * U;
+    let end = advance(o, dir, max);
+    const ignore = new Set([p.id]);
+    for (let i = 0; i < 16 && travel < max; i++) {
+      const hit = this.physics.trace(o, dir, max - travel, ignore);
+      if (!hit) break;
+      const point = advance(o, dir, hit.timeOfImpact);
+      end = point;
+      travel += hit.timeOfImpact;
+      const victim = this.physics.victims.get(hit.collider.handle);
+      if (victim) {
+        ignore.add(victim.id);
+        const v = this.players[victim.id];
+        if (p.team !== v.team && v.alive) {
+          const d = damage(power, g, travel, victim.group, v.armor, v.helmet);
+          v.armor -= d.armor;
+          this.hurt(v, d.hp, p, g, walls > 0, victim.group);
+        }
+        power *= 0.9;
+        o = advance(point, dir, 0.002);
+        continue;
+      }
+      this.emit({ type: "impact", pos: point, normal: hit.normal });
+      if (walls >= 4) break;
+      const thick = this.physics.thickness(hit.collider, point, dir);
+      const mat = this.physics.materials.get(hit.collider.handle) ?? "concrete";
+      power = penetrate(power, g, mat, thick / U);
+      if (p.id === 0)
+        this.traceInfo =
+          mat +
+          " · " +
+          (Number.isFinite(thick) ? Math.round(thick / U) + " u" : "solid") +
+          " · " +
+          Math.round(power) +
+          " dmg";
+      if (!power) {
+        this.emit({
+          type: "trace",
+          actor: p.id,
+          pos: o,
+          end: point,
+          message: "blocked",
+        });
+        break;
+      }
+      this.emit({
+        type: "trace",
+        actor: p.id,
+        pos: o,
+        end: point,
+        message: "air",
+      });
+      this.emit({
+        type: "trace",
+        actor: p.id,
+        pos: point,
+        end: advance(point, dir, thick),
+        message: "solid",
+      });
+      walls++;
+      o = advance(point, dir, thick + 0.002);
+      travel += thick + 0.002;
+    }
+    this.hear(p, g === "m4" ? 20 : 45);
+    this.emit({ type: "shot", actor: p.id, pos: p.eye, end, weapon: g });
+  }
+  hurt(
+    v: Player,
+    amount: number,
+    p: Player | null,
+    weapon: Weapon,
+    wallbang = false,
+    group: Group = "chest",
+  ) {
+    if (!v.alive || amount <= 0) return;
+    v.hp = Math.max(0, v.hp - amount);
+    this.emit({
+      type: "hit",
+      actor: p?.id,
+      victim: v.id,
+      weapon,
+      amount,
+      wallbang,
+      head: group === "head",
+    });
+    if (v.alive) return;
+    v.deaths++;
+    v.nextFire = this.time + 2;
+    this.physics.enable(v.body, false);
+    if (this.carrier === v.id) {
+      this.carrier = -1;
+      this.bomb = { x: v.x, y: v.y + 0.15, z: v.z };
+    }
+    if (p && p.team !== v.team) {
+      p.kills++;
+      p.money = capMoney(p.money + (weapon === "awp" ? 100 : 300));
+    }
+    this.emit({
+      type: "kill",
+      actor: p?.id,
+      victim: v.id,
+      weapon,
+      wallbang,
+      head: group === "head",
+    });
+  }
+  throwGrenade(p: Player, type: "he" | "flash", speed: number) {
+    if (!p[type]) return;
+    p[type]--;
+    const pitch = p.pitch + 10 * DEG,
+      dir = {
+        x: Math.sin(p.yaw) * Math.cos(pitch),
+        y: Math.sin(pitch),
+        z: -Math.cos(p.yaw) * Math.cos(pitch),
+      };
+    const origin = advance(p.eye, dir, 0.15),
+      v = {
+        x: dir.x * speed * U + p.vx * 0.5,
+        y: dir.y * speed * U + p.vy * 0.5,
+        z: dir.z * speed * U + p.vz * 0.5,
+      };
+    this.grenades.push({
+      id: this.nextGrenade++,
+      type,
+      owner: p.id,
+      body: this.physics.grenade(origin, v),
+      expires: this.time + 1.6,
+      lastVy: v.y,
+    });
+    this.equip(p, p.primary?.id ?? p.pistol.id);
+  }
+  visible(a: Vec3, b: Vec3) {
+    const x = b.x - a.x,
+      y = b.y - a.y,
+      z = b.z - a.z,
+      d = Math.hypot(x, y, z);
+    return (
+      d < 0.01 ||
+      !this.physics.ray(
+        a,
+        { x: x / d, y: y / d, z: z / d },
+        Math.max(0, d - 0.02),
+      )
+    );
+  }
+  stepGrenades() {
+    for (let i = this.grenades.length - 1; i >= 0; i--) {
+      const g = this.grenades[i];
+      if (this.time < g.expires) {
+        const vy = g.body.linvel().y;
+        if (g.lastVy < -1.3 && vy > 0)
+          this.emit({ type: "bounce", pos: g.body.translation() });
+        g.lastVy = vy;
+        continue;
+      }
+      const o = g.body.translation();
+      o.y += 0.16;
+      this.emit({
+        type: g.type === "he" ? "explosion" : "flash",
+        pos: o,
+        actor: g.owner,
+      });
+      for (const p of this.players) {
+        if (!p.alive) continue;
+        const dist = Math.hypot(p.x - o.x, p.eye.y - o.y, p.z - o.z),
+          range = (g.type === "he" ? 350 : 1500) * U;
+        if (dist >= range) continue;
+        const eye = p.eye,
+          chest = { ...eye, y: eye.y - 0.48 };
+        const seen =
+          Number(this.visible(o, eye)) + Number(this.visible(o, chest));
+        if (!seen) continue;
+        if (g.type === "he") {
+          const raw = (98 * (1 - dist / range) ** 1.2 * seen) / 2;
+          const armor = Math.min(p.armor, raw * 0.25);
+          p.armor -= armor;
+          this.hurt(
+            p,
+            Math.round(raw - armor * 2),
+            this.players[g.owner],
+            "he",
+          );
+        } else {
+          const facing =
+            ((o.x - p.x) * Math.sin(p.yaw) * Math.cos(p.pitch) -
+              (o.z - p.z) * Math.cos(p.yaw) * Math.cos(p.pitch) +
+              (o.y - eye.y) * Math.sin(p.pitch)) /
+            (dist || 1);
+          const duration =
+            0.3 +
+            (4.57 *
+              clamp((facing + 1) / 1.6, 0.25, 1) *
+              (1 - dist / range) *
+              seen) /
+              2;
+          p.blinded = Math.max(p.blinded, this.time + duration);
+          p.blindDuration = duration;
+          if (p.id === 0)
+            this.emit({ type: "blind", actor: p.id, amount: duration });
+        }
+      }
+      this.physics.world.removeRigidBody(g.body);
+      this.grenades.splice(i, 1);
+    }
+  }
+  finish(winner: Team, reason: string) {
+    if (this.phase !== "live" && this.phase !== "planted") return;
+    this.score[winner]++;
+    const lost = other(winner);
+    for (const p of this.players)
+      p.money = capMoney(
+        p.money +
+          (p.team === winner
+            ? reason.startsWith("Bomb")
+              ? 3500
+              : 3250
+            : lossPay(this.losses[lost])),
+      );
+    this.losses[lost]++;
+    this.losses[winner] = 0;
+    this.phase = "ended";
+    this.left = 5;
+    this.result =
+      (winner === "CT" ? "Counter-Terrorists" : "Terrorists") +
+      " win · " +
+      reason;
+    this.emit({ type: "roundEnd", message: this.result });
+  }
+  dispose() {
+    this.listeners.clear();
+    this.physics.free();
+  }
+}
+export { weaponName, nearest, gear };

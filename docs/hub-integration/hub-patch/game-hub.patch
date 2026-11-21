@@ -1,0 +1,285 @@
+diff --git a/.env.example b/.env.example
+index 357f1df..c1dd563 100644
+--- a/.env.example
++++ b/.env.example
+@@ -2,3 +2,6 @@
+ VITE_SUPABASE_URL=http://127.0.0.1:54321
+ VITE_SUPABASE_PUBLISHABLE_KEY=
+ # Browser-safe key only. Never use secret/service_role keys here.
++
++# Enable after a reviewed game build is present at /cs-web/.
++VITE_ENABLE_CS_WEB=false
+diff --git a/.github/workflows/pages.yml b/.github/workflows/pages.yml
+index 8fd03c6..4d3bcfe 100644
+--- a/.github/workflows/pages.yml
++++ b/.github/workflows/pages.yml
+@@ -24,6 +24,7 @@ jobs:
+         env:
+           VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+           VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
++          VITE_ENABLE_CS_WEB: ${{ vars.VITE_ENABLE_CS_WEB }}
+       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+         if: github.event_name != 'pull_request'
+         with:
+diff --git a/README.md b/README.md
+index e1bec9c..8522050 100644
+--- a/README.md
++++ b/README.md
+@@ -101,3 +101,7 @@ Run `npm run test:settings` locally for configurable poker and rebuy coverage. A
+ ## Relay Room
+ 
+ Two guests can play the co-op flashlight prototype through the shared lobby system. See [Relay Room setup and playtest](docs/relay-room.md) for the local migration, same-origin launch commands, and release settings.
++
++## CS Web
++
++Play a solo tactical match against bots from the optional CS Web catalog card. [CS Web setup and verification](docs/cs-web.md)
+diff --git a/docs/cs-web.md b/docs/cs-web.md
+new file mode 100644
+index 0000000..bf755f5
+--- /dev/null
++++ b/docs/cs-web.md
+@@ -0,0 +1,16 @@
++# CS Web
++
++CS Web is an unofficial desktop browser FPS. One human and nine bots play a 5v5 match. The game ID is `cs-web`. Its static entry document lives at `/cs-web/`, and the game’s own Vite development server uses port 5177.
++
++The catalog card is enabled when `VITE_ENABLE_CS_WEB=true` at hub build time. For production, enable the corresponding Actions variable after a reviewed game build is served on the hub’s origin.
++
++## Run both sites locally
++
++1. Install the dependencies in the CS Web and Game Hub checkouts with `npm ci`.
++2. Configure both checkouts’ ignored `.env.local` files with the same local Supabase URL and publishable key. Start local Supabase as described in the hub backend guide. The hub’s catalog requires guest entry. The standalone game runs without a configured backend.
++3. From the game checkout run `npm test` and `npm run build`.
++4. Set `VITE_ENABLE_CS_WEB=true` in the hub’s `.env.local` and run `npm run build`. Set `CS_WEB_SITE_DIR` to the absolute game checkout path when it is outside the default sibling location.
++5. From the hub checkout run `node --env-file=.env.local scripts/serve-session-test.mjs`. Visit `http://127.0.0.1:4175/game-hub/`, enter a guest name, and select **Play CS Web**. Use **Back to Game Hub** to return.
++6. Stop the server before running `npm run test:cs-web`. Playwright starts the same-origin server for the test. Install the Chromium test browser once with `npx playwright install chromium`.
++
++The standalone client restores verified guest display names and uses locally saved names when guest identity is unavailable. Shared rooms and network play are outside this release. The game’s security policy allows WebAssembly for its bundled Rapier physics engine.
+diff --git a/package.json b/package.json
+index 0a8bb9f..cdcf124 100644
+--- a/package.json
++++ b/package.json
+@@ -21,7 +21,8 @@
+     "test:bots": "node --env-file=.env.local scripts/test-bots.mjs",
+     "test:settings": "node --env-file=.env.local scripts/test-settings.mjs",
+     "dev:relay": "node --env-file=.env.local --experimental-strip-types scripts/serve-session-test.mjs",
+-    "test:relay": "node --env-file=.env.local node_modules/@playwright/test/cli.js test relay-room.spec.js"
++    "test:relay": "node --env-file=.env.local node_modules/@playwright/test/cli.js test relay-room.spec.js",
++    "test:cs-web": "node --env-file=.env.local node_modules/@playwright/test/cli.js test cs-web.spec.js"
+   },
+   "repository": {
+     "type": "git",
+diff --git a/scripts/check-release.mjs b/scripts/check-release.mjs
+index cbcb785..c642e00 100644
+--- a/scripts/check-release.mjs
++++ b/scripts/check-release.mjs
+@@ -11,7 +11,9 @@ if (game === hub || !existsSync(resolve(game,'src/board.js'))) throw new Error('
+ const poker = resolve(process.env.POKER_SITE_DIR ?? '../poker');
+ if (poker === hub || poker === game || !existsSync(resolve(poker,'src/lobbies.js'))) throw new Error('Set POKER_SITE_DIR to the poker checkout.');
+ const relay = resolve(process.env.RELAY_SITE_DIR ?? '../Horror-Friendslop');
+-const directories = [hub,game,poker,relay];
++const csWeb = resolve(process.env.CS_WEB_SITE_DIR ?? '../cs-web');
++if (!existsSync(resolve(csWeb,'src/sim/Sim.ts'))) throw new Error('Set CS_WEB_SITE_DIR to the CS Web checkout.');
++const directories = [hub,game,poker,relay,csWeb];
+ const configs = directories.map(directory => parseEnv(readFileSync(resolve(directory,'.env.local'),'utf8')));
+ for (const config of configs) {
+   const backend = validateClientConfig(config.VITE_SUPABASE_URL,config.VITE_SUPABASE_PUBLISHABLE_KEY);
+@@ -20,7 +22,8 @@ for (const config of configs) {
+ if (configs.some(config => config.VITE_SUPABASE_URL !== configs[0].VITE_SUPABASE_URL || config.VITE_SUPABASE_PUBLISHABLE_KEY !== configs[0].VITE_SUPABASE_PUBLISHABLE_KEY)) throw new Error('Both repositories must target the same local backend.');
+ function run(directory, script) {
+   console.log(`Checking ${directory === hub ? 'hub' : 'game'}: ${script}`);
+-  const result = spawnSync('npm',['run',script],{ cwd: directory, stdio: 'inherit', env: { ...process.env, GAME_SITE_DIR: game, POKER_SITE_DIR: poker, RELAY_SITE_DIR: relay, VITE_ENABLE_RELAY_ROOM: 'true', VITE_SUPABASE_URL: configs[0].VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY: configs[0].VITE_SUPABASE_PUBLISHABLE_KEY } });
++  const npm = process.env.npm_execpath;
++  const result = spawnSync(npm ? process.execPath : 'npm', npm ? [npm,'run',script] : ['run',script],{ cwd: directory, stdio: 'inherit', env: { ...process.env, GAME_SITE_DIR: game, POKER_SITE_DIR: poker, RELAY_SITE_DIR: relay, CS_WEB_SITE_DIR: csWeb, VITE_ENABLE_RELAY_ROOM: 'true', VITE_ENABLE_CS_WEB: 'true', VITE_SUPABASE_URL: configs[0].VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY: configs[0].VITE_SUPABASE_PUBLISHABLE_KEY } });
+   if (result.error || result.status !== 0) process.exit(result.status || 1);
+ }
+ // Complete builds before serving either dist directory to the browser suite.
+diff --git a/scripts/serve-session-test.mjs b/scripts/serve-session-test.mjs
+index 2654429..f8120e6 100644
+--- a/scripts/serve-session-test.mjs
++++ b/scripts/serve-session-test.mjs
+@@ -8,10 +8,11 @@ const relayEnabled = process.env.VITE_ENABLE_RELAY_ROOM === 'true';
+ const roots = {
+   ...(relayEnabled ? {'relay-room': resolve(relay,'dist')} : {}),
+   'game-hub': resolve('dist'),
++  'cs-web': resolve(process.env.CS_WEB_SITE_DIR ?? '../cs-web', 'dist'),
+   'poker': resolve(process.env.POKER_SITE_DIR ?? '../poker', 'dist'),
+   'tic-tac-toe': resolve(process.env.GAME_SITE_DIR ?? '../tic-tac-toe', 'dist'),
+ };
+-const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml' };
++const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.webp': 'image/webp', '.woff2': 'font/woff2', '.wasm': 'application/wasm', '.json': 'application/json' };
+ const server = createServer(async (request, response) => {
+   try {
+     const [slug, ...parts] = new URL(request.url, 'http://127.0.0.1').pathname.slice(1).split('/');
+diff --git a/src/game-catalog.js b/src/game-catalog.js
+index 93061d6..ce73b78 100644
+--- a/src/game-catalog.js
++++ b/src/game-catalog.js
+@@ -28,6 +28,15 @@ const games = [
+     details: ['2 players', 'Co-op flashlight prototype'],
+     devPort: 5176,
+   },
++  {
++    slug: 'cs-web',
++    title: 'CS Web',
++    titleId: 'cs-web-title',
++    linkId: 'cs-web-link',
++    linkLabel: 'Play CS Web',
++    details: ['Solo vs bots', 'Tactical FPS (fan project)'],
++    devPort: 5177,
++  },
+ ];
+ 
+ function element(tag, className, text) {
+@@ -40,6 +49,7 @@ function element(tag, className, text) {
+ export function mountGameCatalog(container, { dev = false } = {}) {
+   for (const [index, game] of games.entries()) {
+     if (game.slug === 'relay-room' && import.meta.env.VITE_ENABLE_RELAY_ROOM !== 'true') continue;
++    if (game.slug === 'cs-web' && import.meta.env.VITE_ENABLE_CS_WEB !== 'true') continue;
+     const first = index === 0;
+     const card = first ? container : element('div', 'catalog-extra');
+     const title = element('h2', '', game.title);
+diff --git a/tests/browser/cs-web.spec.js b/tests/browser/cs-web.spec.js
+new file mode 100644
+index 0000000..d4fba3b
+--- /dev/null
++++ b/tests/browser/cs-web.spec.js
+@@ -0,0 +1,138 @@
++import { randomUUID } from 'node:crypto';
++import { mkdir } from 'node:fs/promises';
++import { resolve } from 'node:path';
++import { test, expect } from '@playwright/test';
++
++const enabled = process.env.VITE_ENABLE_CS_WEB === 'true';
++const callsign = page => page.getByRole('textbox', { name: /player name|display name|callsign/i });
++
++function sessionFingerprint(page) {
++  return page.evaluate(async () => {
++    const session = localStorage.getItem('game-hub-auth');
++    if (!session) return null;
++    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(session));
++    return Array.from(new Uint8Array(hash), value => value.toString(16).padStart(2, '0')).join('');
++  });
++}
++
++async function capture(page, filename) {
++  if (!process.env.CS_WEB_SCREENSHOTS) return;
++  await mkdir(process.env.CS_WEB_SCREENSHOTS, { recursive: true });
++  await page.screenshot({ path: resolve(process.env.CS_WEB_SCREENSHOTS, filename), fullPage: true });
++}
++
++test('the catalog flag controls the CS Web card', async ({ page }) => {
++  await page.goto('/game-hub/');
++  await expect(page.locator('#game-link')).toBeAttached();
++  const card = page.locator('#cs-web-link');
++  if (enabled) {
++    await expect(card).toHaveAttribute('href', '/cs-web/');
++    await expect(page.locator('#cs-web-title')).toHaveText('CS Web');
++  } else {
++    await expect(card).toHaveCount(0);
++  }
++});
++
++test.describe('CS Web integration', () => {
++  test.skip(!enabled, 'The CS Web catalog card is disabled for this build.');
++
++  test('a hub guest launches the game, retains their identity, and returns', async ({ page }) => {
++    await page.goto('/game-hub/');
++    const name = 'Echo ' + randomUUID().slice(0, 6);
++    await page.getByLabel('Display name', { exact: true }).fill(name);
++    await page.getByRole('button', { name: 'Continue', exact: true }).click();
++    await expect(page.locator('#identity')).toContainText(name);
++    const session = await sessionFingerprint(page);
++    expect(session).toBeTruthy();
++    await capture(page, 'hub-card.png');
++    await page.getByRole('link', { name: 'Play CS Web' }).click();
++    await expect(page).toHaveURL(/\/cs-web\/$/);
++    await expect(callsign(page)).toHaveValue(name);
++    await capture(page, 'game-menu.png');
++    expect(await sessionFingerprint(page)).toBe(session);
++    await page.getByRole('link', { name: /back to game hub/i }).click();
++    await expect(page).toHaveURL(/\/game-hub\/$/);
++    await expect(page.locator('#identity')).toContainText(name);
++    for (const id of ['game-link', 'poker-link', 'cs-web-link']) await expect(page.locator('#' + id)).toBeVisible();
++    await capture(page, 'hub-return.png');
++  });
++
++  test('solo entry keeps its local name when guest verification is unavailable', async ({ page }) => {
++    await page.goto('/game-hub/');
++    await page.getByLabel('Display name', { exact: true }).fill('Hub guest');
++    await page.getByRole('button', { name: 'Continue', exact: true }).click();
++    await expect(page.locator('#identity')).toContainText('Hub guest');
++    await page.evaluate(() => localStorage.setItem('cs-web:player-name', 'Local pilot'));
++    const session = await sessionFingerprint(page);
++    await page.route('**/auth/v1/user*', route => route.abort());
++    await page.getByRole('link', { name: 'Play CS Web' }).click();
++    await expect(callsign(page)).toHaveValue('Local pilot', { timeout: 12000 });
++    expect(await sessionFingerprint(page)).toBe(session);
++  });
++
++  test('room links recover to the solo lobby and remain reloadable', async ({ page }) => {
++    await page.goto('/cs-web/?lobby=' + randomUUID());
++    await expect(page.getByText(/shared rooms for CS Web/i)).toBeVisible();
++    await expect(page).toHaveURL(/\/cs-web\/$/);
++    await page.reload();
++    await expect(callsign(page)).toBeVisible();
++    await page.goto('/cs-web/?room=invalid');
++    await expect(page.getByText(/room link is invalid/i)).toBeVisible();
++    await expect(page).toHaveURL(/\/cs-web\/$/);
++  });
++
++  test('a bot match advances under the production security policy', async ({ page }) => {
++    test.setTimeout(75000);
++    const errors = [];
++    page.on('pageerror', error => errors.push(error.message));
++    page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
++    await page.addInitScript(() => {
++      window.cswViolations = [];
++      document.addEventListener('securitypolicyviolation', event => window.cswViolations.push(event.effectiveDirective));
++    });
++    await page.goto('/cs-web/?autostart=1&botsonly=1');
++    const policy = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
++    expect(policy).toContain("'wasm-unsafe-eval'");
++    expect(policy).not.toContain("'unsafe-eval'");
++    await expect(page.locator('[data-phase="live"]')).toBeVisible({ timeout: 60000 });
++    const timer = page.getByTestId('round-timer');
++    await expect(timer).toBeVisible();
++    await expect(timer).not.toHaveText(await timer.innerText(), { timeout: 6000 });
++    expect(await page.evaluate(() => window.cswViolations)).toEqual([]);
++    expect(errors).toEqual([]);
++  });
++
++  test('the solo lobby supports a small screen and keyboard navigation', async ({ page }) => {
++    await page.setViewportSize({ width: 360, height: 800 });
++    await page.goto('/cs-web/');
++    const name = callsign(page);
++    await expect(name).toBeVisible();
++    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
++    for (let press = 0; press < 50 && !await name.evaluate(el => document.activeElement === el); press++) {
++      await page.keyboard.press('Tab');
++    }
++    await expect(name).toBeFocused();
++    await name.fill('Keyboard pilot');
++    const back = page.getByRole('link', { name: /back to game hub/i });
++    for (let press = 0; press < 50 && !await back.evaluate(el => document.activeElement === el); press++) {
++      await page.keyboard.press('Tab');
++    }
++    await expect(back).toBeFocused();
++    await page.keyboard.press('Enter');
++    await expect(page).toHaveURL(/\/game-hub\/$/);
++  });
++
++  test('a player opens the Mirage armory and buys a defuse kit', async ({ page }) => {
++    test.setTimeout(60000);
++    await page.goto('/cs-web/?autostart=1&map=mirage&side=CT');
++    await expect(page.locator('[data-phase="freeze"]')).toBeVisible({timeout: 45000});
++    await page.locator('canvas[aria-label="First-person game view"]').focus();
++    await page.keyboard.press('b');
++    const armory = page.getByRole('dialog', { name:'Buy menu' });
++    await expect(armory).toBeVisible();
++    await armory.getByRole('button', { name:/equipment/i }).click();
++    await armory.getByRole('button', { name:/defuse kit/i }).click();
++    await expect(armory.getByText(/kit equipped/i)).toBeVisible();
++    await capture(page, 'buy-menu.png');
++  });
++});
