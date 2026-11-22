@@ -334,6 +334,7 @@ export async function createGame(
     audio.play(e);
     if (e.type === "shot" && e.pos && e.end)
       renderer?.shot(e.pos, e.end, e.weapon, e.actor);
+    if (e.type === "blood") renderer?.bleed(e);
     if (e.type === "tracer" && e.pos && e.end)
       renderer?.shot(e.pos, e.end, "pellet", e.actor);
     if (e.type === "kill" && e.victim !== undefined && e.dir) {

@@ -555,6 +555,8 @@ export interface PoseInput {
   /** Recoil offset of the weapon from the view, in radians. */
   kickPitch: number;
   kickYaw: number;
+  /** A recent hit: seconds since it landed, the hitbox group and the bullet's travel in body space (+z is backwards). */
+  flinch?: { age: number; group: string; x: number; z: number };
 }
 const upAxis = new THREE.Vector3(),
   tilt = new THREE.Quaternion();
@@ -589,6 +591,26 @@ export function pose(
     m.torso.rotation.set(lean, 0, 0);
     m.head.rotation.set(THREE.MathUtils.clamp(a.pitch * 0.55, -0.6, 0.6) - lean, 0, 0);
     m.held.rotation.set(a.pitch + a.kickPitch - lean, -a.kickYaw, 0);
+    const fl = a.flinch;
+    if (fl && fl.age < 0.7) {
+      // Hit reaction seen by other players: snaps away from the bullet, overshoots slightly, settles.
+      // The victim's own camera never moves; their model is not drawn in first person.
+      const f =
+          (1 - Math.exp(-fl.age * 55)) * Math.exp(-fl.age * 7) * Math.cos(fl.age * 5),
+        head = fl.group === "head",
+        leg = fl.group === "leg";
+      m.head.rotation.x += (head ? 0.95 : 0.18) * f * fl.z;
+      m.head.rotation.z -= (head ? 0.7 : 0.12) * f * fl.x;
+      m.head.rotation.y += (head ? 0.3 : 0) * f * fl.x;
+      if (leg) {
+        m.body.position.y -= 0.07 * f;
+        m.torso.rotation.x -= 0.12 * f;
+      } else {
+        m.torso.rotation.x += (head ? 0.12 : 0.3) * f * fl.z;
+        m.torso.rotation.z -= (head ? 0.06 : 0.22) * f * fl.x;
+      }
+      if (fl.group === "arm") m.torso.rotation.y += 0.28 * f * (fl.x < 0 ? -1 : 1);
+    }
     for (const arm of m.arms) {
       const grip = arm.side > 0 ? m.grip.right : m.grip.left;
       if (grip) target.copy(grip).applyEuler(m.held.rotation).add(m.held.position);

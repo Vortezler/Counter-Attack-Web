@@ -63,7 +63,8 @@ export interface SimEvent {
   amount?: number;
   wallbang?: boolean;
   head?: boolean;
-  dir?: { x: number; z: number };
+  /** Horizontal for kills; blood events also carry the bullet's vertical component. */
+  dir?: { x: number; z: number; y?: number };
 }
 interface Grenade {
   id: number;
@@ -808,6 +809,7 @@ export class Sim {
         hp *= 0.85;
       }
       result = behind ? "backstab" : "hit";
+      this.bleed(p, v, at, dir, "chest");
       this.hurt(v, Math.round(hp), p, "knife");
       break;
     }
@@ -901,6 +903,7 @@ export class Sim {
           acc.head ||= victim.group === "head";
           acc.wall ||= walls > 0;
           hits.set(v.id, acc);
+          this.bleed(p, v, point, dir, victim.group);
         }
         power *= 0.9;
         o = advance(point, dir, 0.002);
@@ -948,6 +951,36 @@ export class Sim {
       travel += thick + 0.002;
     }
     return end;
+  }
+  /**
+   * Blood from a hit at `at`: the spray carries on along the bullet, and the splat lands on the
+   * first wall behind the victim within 3.5 m, else on the ground about a metre past them.
+   * Pure queries: no randomness or state, so simulations replay identically.
+   */
+  bleed(p: Player, v: Player, at: Vec3, dir: Vec3, group: string) {
+    let end: Vec3 | undefined, normal: Vec3 | undefined;
+    const wall = this.physics.surface(at, dir, 3.5);
+    if (wall && wall.timeOfImpact > 0.02) {
+      end = advance(at, dir, wall.timeOfImpact);
+      normal = wall.normal;
+    } else if (!wall) {
+      const from = advance(at, { x: dir.x, y: Math.min(0, dir.y), z: dir.z }, 1.1),
+        floor = this.physics.surface(from, { x: 0, y: -1, z: 0 }, 3);
+      if (floor && floor.timeOfImpact > 0) {
+        end = { x: from.x, y: from.y - floor.timeOfImpact, z: from.z };
+        normal = floor.normal;
+      }
+    }
+    this.emit({
+      type: "blood",
+      actor: p.id,
+      victim: v.id,
+      pos: at,
+      end,
+      normal: normal && { x: normal.x, y: normal.y, z: normal.z },
+      dir: { x: dir.x, y: dir.y, z: dir.z },
+      message: group,
+    });
   }
   hurt(
     v: Player,

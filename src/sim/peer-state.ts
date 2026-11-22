@@ -143,7 +143,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
 export function readEvent(value: unknown): SimEvent | null {
   if (!record(value) || typeof value.type !== "string" ||
       !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step",
-        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash"].includes(value.type)) return null;
+        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash", "blood"].includes(value.type)) return null;
   const event: SimEvent = { type: value.type };
   for (const key of ["actor", "victim"] as const) {
     const index = value[key];
@@ -160,6 +160,9 @@ export function readEvent(value: unknown): SimEvent | null {
   if (value.wallbang === true) event.wallbang = true;
   if (value.head === true) event.head = true;
   const dir = value.dir;
-  if (record(dir) && finite(dir.x, 1) && finite(dir.z, 1)) event.dir = { x: dir.x, z: dir.z };
+  if (record(dir) && finite(dir.x, 1) && finite(dir.z, 1)) {
+    event.dir = { x: dir.x, z: dir.z };
+    if (finite(dir.y, 1)) event.dir.y = dir.y;
+  }
   return event;
 }

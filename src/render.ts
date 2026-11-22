@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Box, MapDef, Team, Vec3 } from "./world";
+import { BloodFx } from "./blood";
 import {
   hold,
   humanoid,
@@ -1773,6 +1774,13 @@ export class GameRenderer {
     }
   >();
   private puff = softTexture("smoke");
+  private blood: BloodFx;
+  /** Last hit per player, for the third-person flinch. */
+  private flinches = new Map<
+    number,
+    { t0: number; group: string; x: number; z: number }
+  >();
+  private clock = 0;
   private flame = softTexture("flame");
   private nadeMats = new Map<string, THREE.MeshStandardMaterial>();
   private arsenal = new Map<string, THREE.Group>();
@@ -1926,6 +1934,7 @@ export class GameRenderer {
     );
     this.muzzleLight.visible = false;
     this.hands.add(this.muzzleLight);
+    this.blood = new BloodFx(this.scene, this.puff);
     this.resize();
   }
   resize() {
@@ -2169,6 +2178,26 @@ export class GameRenderer {
         this.viewFlash = 0.045;
     }
   }
+  /** A bullet or knife hit: blood spray and a splat behind the victim, plus their flinch. */
+  bleed(e: {
+    victim?: number;
+    pos?: Vec3;
+    end?: Vec3;
+    normal?: Vec3;
+    dir?: { x: number; y?: number; z: number };
+    message?: string;
+  }) {
+    if (!e.pos || !e.dir) return;
+    const dir = { x: e.dir.x, y: e.dir.y ?? 0, z: e.dir.z };
+    this.blood.hit(e.pos, dir, e.end, e.normal, e.message === "head");
+    if (e.victim !== undefined)
+      this.flinches.set(e.victim, {
+        t0: this.clock,
+        group: e.message ?? "chest",
+        x: dir.x,
+        z: dir.z,
+      });
+  }
   burst(pos: Vec3, type: string) {
     const b = this.bursts[this.burstIndex++ % this.bursts.length];
     b.mesh.position.set(pos.x, pos.y, pos.z);
@@ -2260,6 +2289,8 @@ export class GameRenderer {
       elapsed = this.lastClock ? Math.min(0.15, now - this.lastClock) : 1 / 60;
     this.lastClock = now;
     const t = f.time ?? now;
+    this.clock = t;
+    this.blood.update(elapsed);
     if (f.shadows !== this.shadowSetting) {
       this.shadowSetting = f.shadows ?? true;
       if (f.shadows === false) {
@@ -2379,6 +2410,21 @@ export class GameRenderer {
         last.z + (p.z - last.z) * alpha,
       );
       model.body.rotation.y = -p.yaw;
+      const hit = this.flinches.get(p.id);
+      let flinch: { age: number; group: string; x: number; z: number } | undefined;
+      if (hit) {
+        const age = t - hit.t0,
+          cos = Math.cos(p.yaw),
+          sin = Math.sin(p.yaw);
+        if (age < 0 || age > 0.8) this.flinches.delete(p.id);
+        else
+          flinch = {
+            age,
+            group: hit.group,
+            x: hit.x * cos + hit.z * sin,
+            z: -hit.x * sin + hit.z * cos,
+          };
+      }
       pose(
         model,
         rag,
@@ -2390,6 +2436,7 @@ export class GameRenderer {
           pitch: p.pitch ?? 0,
           kickPitch: 2 * (p.punchX ?? 0) * DEG,
           kickYaw: 2 * (p.punchY ?? 0) * DEG,
+          flinch,
         },
         elapsed,
       );

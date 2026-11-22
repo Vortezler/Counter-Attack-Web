@@ -139,6 +139,16 @@ export class Physics {
       groups(8, 1),
     );
   }
+  /** World geometry only (no players), with the surface normal: where blood lands. */
+  surface(o: Vec3, d: Vec3, max: number) {
+    return this.world.castRayAndGetNormal(
+      new R.Ray(o, d),
+      max,
+      true,
+      undefined,
+      groups(8, 1),
+    );
+  }
   trace(o: Vec3, d: Vec3, max: number, ignore: Set<number>) {
     return this.world.castRayAndGetNormal(
       new R.Ray(o, d),

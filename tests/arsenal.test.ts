@@ -73,6 +73,29 @@ describe("weapons", () => {
     expect(p.kills).toBe(1);
     expect(p.roundKills).toBe(1);
   });
+  it("bleeds on hits: spray along the bullet and a splat on the surface behind the victim", () => {
+    const s = fixture(),
+      p = s.me;
+    s.phase = "live";
+    s.left = 100;
+    duel(s, 6);
+    const blood: NonNullable<Parameters<Parameters<Sim["onEvent"]>[0]>[0]>[] = [];
+    s.onEvent((e) => {
+      if (e.type === "blood") blood.push(e);
+    });
+    step(s, 40);
+    s.step({ 0: { ...idle(p.yaw, p.pitch), fire: true } });
+    expect(blood.length).toBe(1);
+    const [e] = blood;
+    expect(e.victim).toBe(5);
+    expect(e.actor).toBe(0);
+    expect(["head", "chest", "stomach", "arm", "leg"]).toContain(e.message);
+    // The bullet travels north (-z), so the spray heads north and the splat lands past the victim.
+    expect(e.dir!.z).toBeLessThan(-0.9);
+    expect(e.end).toBeDefined();
+    expect(e.end!.z).toBeLessThan(e.pos!.z);
+    expect(Math.hypot(e.normal!.x, e.normal!.y, e.normal!.z)).toBeCloseTo(1, 3);
+  });
   it("cycles scope levels: two on the SSG, one on the AUG", () => {
     const s = (sim = new Sim(maps.dust2, "CT", "normal", "Test", 9)),
       p = s.me;
