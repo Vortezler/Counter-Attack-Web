@@ -1,6 +1,16 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Box, MapDef, Team, Vec3 } from "./world";
+import {
+  hold,
+  humanoid,
+  muzzleOf,
+  palettes,
+  pose,
+  type Humanoid,
+  type Ragdoll,
+} from "./characters";
 
 export interface RenderActor extends Vec3 {
   id: number;
@@ -12,6 +22,9 @@ export interface RenderActor extends Vec3 {
   pitch?: number;
   weapon?: string;
   last?: Vec3;
+  /** Recoil punch in degrees; the weapon tilts by twice this, like the bullets. */
+  punchX?: number;
+  punchY?: number;
 }
 export interface RenderFrame {
   camera: Vec3 & { yaw: number; pitch: number };
@@ -19,6 +32,8 @@ export interface RenderFrame {
   viewId: number;
   weapon: string;
   kick?: number;
+  /** Where bullets go relative to the camera, in radians: the viewmodel turns to match. */
+  aim?: { pitch: number; yaw: number };
   /** Knife swing progress, 0 at the start of an attack and 1 at rest. */
   swing?: number;
   heavy?: boolean;
@@ -39,6 +54,18 @@ export interface RenderFrame {
   alpha?: number;
 }
 
+const DEG = Math.PI / 180;
+/** How hard each weapon shoves back into the shoulder per shot (1 = rifle). */
+const kickScale: Partial<Record<string, number>> = {
+  awp: 1.9,
+  ssg: 1.5,
+  deagle: 1.6,
+  nova: 1.8,
+  xm: 1.6,
+  glock: 0.8,
+  p90: 0.75,
+  negev: 0.85,
+};
 const dark = "#282e2d",
   gunmetal = "#414947",
   matte = "#343b39",
@@ -478,44 +505,45 @@ function gun(id: string) {
   }
   return g;
 }
-function heldWeapon(id: string) {
+function heldWeapon(id: string, team: Team) {
   const rig = new THREE.Group(),
-    model = gun(id);
+    model = gun(id),
+    ct = team === "CT",
+    c = ct ? palettes.CT : palettes.T;
+  rig.userData.muzzle = muzzleOf(model);
   rig.add(model);
   const hand = (x: number, y: number, z: number, left: boolean) => {
-    const glove = piece(
-      rig,
-      new THREE.SphereGeometry(1, 8, 6),
-      "#554e3c",
-      x,
-      y,
-      z,
-    );
-    glove.scale.set(0.053, 0.071, 0.072);
-    glove.rotation.x = 0.24;
-    for (let i = 0; i < 3; i++) {
-      const finger = part(
+    const s = left ? -1 : 1;
+    const palm = piece(rig, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), c.glove, x, y, z);
+    palm.rotation.x = 0.24;
+    // Fingers wrap across the front of the grip; the thumb closes over the top.
+    for (let i = 0; i < 4; i++) {
+      const finger = piece(
         rig,
-        0.013,
-        0.021,
-        0.056,
-        "#645b46",
-        x + (left ? 0.038 : -0.038),
-        y + 0.035 - i * 0.026,
-        z - 0.011,
+        new THREE.CapsuleGeometry(0.0115, 0.034, 3, 8),
+        c.glove,
+        x - s * 0.01,
+        y + 0.03 - i * 0.021,
+        z - 0.04 + i * 0.005,
       );
-      finger.rotation.y = left ? 0.23 : -0.23;
+      finger.rotation.z = Math.PI / 2;
     }
-    const sleeve = piece(
-      rig,
-      new THREE.CylinderGeometry(0.052, 0.08, 0.35, 8),
-      left ? "#696a52" : "#626951",
-      x + (left ? -0.051 : 0.06),
-      y - 0.122,
-      z + 0.135,
-    );
-    sleeve.rotation.x = -0.91;
-    sleeve.rotation.z = left ? -0.3 : 0.36;
+    const thumb = piece(rig, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), c.glove, x - s * 0.03, y + 0.036, z + 0.008);
+    thumb.rotation.set(-0.7, 0, s * 0.4);
+    part(rig, 0.012, 0.06, 0.05, ct ? "#1b1e1f" : "#2c2720", x + s * 0.031, y + 0.004, z - 0.004);
+    const arm = new THREE.Group();
+    arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
+    arm.rotation.set(-0.91, 0, left ? -0.3 : 0.36);
+    rig.add(arm);
+    if (ct) {
+      piece(arm, new THREE.CylinderGeometry(0.052, 0.08, 0.35, 14), left ? "#53626a" : palettes.CT.shirt, 0, 0, 0);
+      piece(arm, new THREE.CylinderGeometry(0.047, 0.05, 0.05, 14), c.glove, 0, 0.17, 0);
+      piece(arm, new THREE.CylinderGeometry(0.057, 0.06, 0.014, 14), palettes.CT.dark, 0, 0.1, 0);
+    } else {
+      piece(arm, new THREE.CylinderGeometry(0.044, 0.058, 0.35, 14), palettes.T.skin, 0, 0, 0);
+      piece(arm, new THREE.CylinderGeometry(0.076, 0.083, 0.08, 14), palettes.T.dark, 0, -0.15, 0);
+      piece(arm, new THREE.CylinderGeometry(0.046, 0.047, 0.04, 14), c.glove, 0, 0.17, 0);
+    }
   };
   hand(0.038, -0.083, 0.033, false);
   const small = [
@@ -574,169 +602,6 @@ function flatten(group: THREE.Group) {
   }
 }
 
-function humanoid(team: Team) {
-  const root = new THREE.Group(),
-    fall = new THREE.Group(),
-    body = new THREE.Group(),
-    torso = new THREE.Group(),
-    head = new THREE.Group(),
-    held = new THREE.Group(),
-    ct = team === "CT",
-    uniform = ct ? "#586b74" : "#a88059",
-    vest = ct ? "#384a50" : "#665944",
-    legs: THREE.Group[] = [],
-    arms: THREE.Group[] = [];
-  root.add(fall);
-  fall.add(body);
-  body.add(torso, head, held);
-  for (const x of [-0.135, 0.135]) {
-    const leg = new THREE.Group();
-    body.add(leg);
-    leg.position.set(x, 0.79, 0);
-    legs.push(leg);
-    part(leg, 0.19, 0.38, 0.2, uniform, 0, -0.18, 0);
-    part(leg, 0.16, 0.3, 0.17, uniform, 0, -0.49, 0);
-    part(leg, 0.18, 0.15, 0.26, "#3c3930", 0, -0.704, -0.025);
-    part(leg, 0.16, 0.16, 0.07, vest, 0, -0.385, -0.095);
-  }
-  part(torso, 0.41, 0.53, 0.23, uniform, 0, 1.05, 0);
-  part(torso, 0.46, 0.35, 0.28, vest, 0, 1.18, 0);
-  for (const x of [-0.13, 0, 0.13])
-    part(torso, 0.107, 0.155, 0.07, ct ? "#62716b" : "#83775b", x, 1.1, -0.142);
-  head.position.set(0, 1.4, 0);
-  const skull = piece(
-    head,
-    new THREE.SphereGeometry(0.159, 10, 7),
-    ct ? "#907f67" : "#a88665",
-    0,
-    0.17,
-    0,
-  );
-  skull.scale.z = 0.88;
-  if (ct) {
-    const helm = piece(
-      head,
-      new THREE.SphereGeometry(0.181, 12, 7, 0, Math.PI * 2, 0, Math.PI * 0.63),
-      "#4a5d62",
-      0,
-      0.22,
-      0,
-    );
-    helm.scale.y = 0.82;
-    part(head, 0.243, 0.066, 0.039, "#393e39", 0, 0.19, -0.127);
-  } else {
-    part(head, 0.274, 0.084, 0.06, "#6d6553", 0, 0.12, -0.11);
-    part(head, 0.285, 0.081, 0.22, "#967654", 0, 0.288, 0);
-  }
-  for (const side of [-1, 1]) {
-    const arm = new THREE.Group();
-    arm.position.set(side * 0.25, 1.33, -0.02);
-    body.add(arm);
-    arms.push(arm);
-    const upper = part(
-      arm,
-      0.14,
-      0.33,
-      0.15,
-      uniform,
-      side * 0.015,
-      -0.15,
-      -0.02,
-    );
-    upper.rotation.x = -0.35;
-    const forearm = part(
-      arm,
-      0.12,
-      0.12,
-      0.28,
-      uniform,
-      side * -0.025,
-      -0.29,
-      -0.15,
-    );
-    forearm.rotation.y = side * 0.3;
-  }
-  held.position.set(0.13, 1.105, -0.31);
-  [...legs, ...arms, torso, head].forEach(flatten);
-  return { root, fall, body, head, held, item: "", legs, arms, team };
-}
-type Humanoid = ReturnType<typeof humanoid>;
-interface Ragdoll {
-  t0: number;
-  dir: { x: number; z: number };
-  head: boolean;
-  side: number;
-}
-const upAxis = new THREE.Vector3(),
-  tilt = new THREE.Quaternion();
-function pose(
-  m: Humanoid,
-  rag: Ragdoll | undefined,
-  t: number,
-  moving: boolean,
-  id: number,
-) {
-  if (!rag) {
-    m.fall.quaternion.identity();
-    m.fall.position.set(0, 0, 0);
-    m.held.visible = true;
-    m.head.rotation.set(0, 0, 0);
-    m.arms.forEach((a) => a.rotation.set(0, 0, 0));
-    m.legs.forEach((leg, i) => {
-      leg.rotation.set(
-        moving ? Math.sin(t * 10 + id + i * Math.PI) * 0.44 : 0,
-        0,
-        0,
-      );
-    });
-    return;
-  }
-  // Closed-form topple: gravity accelerates the fall about the feet, then the body bounces and settles.
-  const age = Math.max(0, t - rag.t0),
-    w0 = rag.head ? 2.6 : 1.4,
-    alpha = 15,
-    land = (-w0 + Math.sqrt(w0 * w0 + alpha * Math.PI)) / alpha;
-  const theta =
-    age < land
-      ? w0 * age + 0.5 * alpha * age * age
-      : Math.PI / 2 -
-        0.16 *
-          Math.abs(Math.sin((age - land) * 13)) *
-          Math.exp(-(age - land) * 6);
-  const ease = Math.min(1, age / 0.5),
-    wobble = Math.sin(age * 15) * Math.exp(-age * 3.5);
-  upAxis.set(rag.dir.z, 0, -rag.dir.x).normalize();
-  tilt.setFromAxisAngle(upAxis, Math.min(Math.PI / 2, theta));
-  m.fall.quaternion.copy(tilt);
-  const slide = (rag.head ? 0.75 : 0.45) * (1 - Math.exp(-age * 5));
-  m.fall.position.set(
-    rag.dir.x * slide,
-    0.13 * Math.sin(Math.min(Math.PI / 2, theta)),
-    rag.dir.z * slide,
-  );
-  m.held.visible = false;
-  m.head.rotation.set(
-    0.55 * ease + wobble * 0.35,
-    rag.side * 0.4 * ease,
-    rag.side * 0.25 * ease,
-  );
-  m.arms.forEach((a, i) => {
-    const s = i ? 1 : -1;
-    a.rotation.set(
-      -0.4 - 1.3 * ease + wobble * 0.6 * s,
-      0,
-      s * (0.25 + 1.05 * ease) + wobble * 0.5,
-    );
-  });
-  m.legs.forEach((leg, i) => {
-    const s = i ? 1 : -1;
-    leg.rotation.set(
-      (0.35 + 0.25 * rag.side * s) * ease + wobble * 0.3,
-      0,
-      s * 0.22 * ease,
-    );
-  });
-}
 function seeded(initial: number) {
   let n = initial;
   return () => {
@@ -1878,7 +1743,7 @@ function releaseTree(root: THREE.Object3D) {
     for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
       material.add(mat);
       const t = (mat as THREE.MeshStandardMaterial).map;
-      if (t) textures.add(t);
+      if (t && !t.userData.shared) textures.add(t);
     }
   });
   geometry.forEach((g) => g.dispose());
@@ -1915,7 +1780,16 @@ export class GameRenderer {
   private bomb: THREE.Group;
   private throws: THREE.Mesh[] = [];
   private decals: THREE.Mesh[] = [];
-  private tracers: { line: THREE.Line; ttl: number }[] = [];
+  /** `local` tracers start at the first-person muzzle, re-anchored every frame as the view moves. */
+  private tracers: { line: THREE.Line; ttl: number; local: boolean }[] = [];
+  private viewId = -1;
+  private firstPerson = false;
+  private viewMuzzle = new THREE.Vector3();
+  private handsMuzzle = new THREE.Vector3();
+  private ndc = new THREE.Vector3();
+  private baseTurn = new THREE.Euler();
+  private recoilTurn = new THREE.Euler(0, 0, 0, "YXZ");
+  private recoilQuat = new THREE.Quaternion();
   private debugTraces: {
     line: THREE.Line<THREE.BufferGeometry, THREE.LineBasicMaterial>;
     ttl: number;
@@ -2028,7 +1902,7 @@ export class GameRenderer {
       const line = new THREE.Line(g, tracerMaterial);
       line.visible = false;
       line.frustumCulled = false;
-      this.tracers.push({ line, ttl: 0 });
+      this.tracers.push({ line, ttl: 0, local: false });
       this.scene.add(line);
     }
     const sphere = new THREE.IcosahedronGeometry(1, 1);
@@ -2258,17 +2132,34 @@ export class GameRenderer {
         this.flames.delete(id);
       }
   }
-  shot(from: Vec3, to: Vec3, weapon = "", local = false) {
+  /** Third-person muzzle of `actor`'s weapon in world space, if their model is drawn. */
+  private muzzleWorld(actor: number | undefined) {
+    const m = actor === undefined ? undefined : this.people.get(actor),
+      item = m?.held.children[0];
+    if (!m || !m.root.visible || !m.held.visible || !item?.userData.muzzle)
+      return null;
+    m.root.updateMatrixWorld(true);
+    return (item.userData.muzzle as THREE.Vector3)
+      .clone()
+      .applyMatrix4(item.matrixWorld);
+  }
+  /** Draws a tracer from the shooter's barrel: the first-person muzzle for the viewed player, else their model's. */
+  shot(from: Vec3, to: Vec3, weapon = "", actor?: number) {
     if (weapon !== "m4" && weapon !== "M4A1-S") {
       const t = this.tracers[this.traces++ % this.tracers.length],
-        a = t.line.geometry.getAttribute("position");
-      a.setXYZ(0, from.x, from.y - 0.065, from.z);
+        a = t.line.geometry.getAttribute("position"),
+        local = actor !== undefined && actor === this.viewId && this.firstPerson,
+        start = local
+          ? this.viewMuzzle
+          : (this.muzzleWorld(actor) ?? { x: from.x, y: from.y - 0.065, z: from.z });
+      t.local = local;
+      a.setXYZ(0, start.x, start.y, start.z);
       a.setXYZ(1, to.x, to.y, to.z);
       a.needsUpdate = true;
       t.line.visible = true;
       t.ttl = 0.056;
       if (
-        local ||
+        (actor !== undefined && actor === this.viewId) ||
         Math.hypot(
           from.x - this.camera.position.x,
           from.y - this.camera.position.y,
@@ -2475,11 +2366,11 @@ export class GameRenderer {
         releaseTree(model.held);
         model.held.clear();
         const item = gun(weapon);
+        item.userData.muzzle = muzzleOf(item);
         flatten(item);
         model.held.add(item);
-        model.item = weapon;
+        hold(model, weapon);
       }
-      model.held.rotation.x = p.pitch ?? 0;
       const last = p.last ?? p,
         alpha = f.alpha ?? 1;
       model.root.position.set(
@@ -2488,8 +2379,20 @@ export class GameRenderer {
         last.z + (p.z - last.z) * alpha,
       );
       model.body.rotation.y = -p.yaw;
-      model.body.scale.y = p.crouched && p.alive ? 0.75 : 1;
-      pose(model, rag, t, !!p.moving, p.id);
+      pose(
+        model,
+        rag,
+        t,
+        p.id,
+        {
+          moving: !!p.moving,
+          crouched: !!p.crouched && p.alive,
+          pitch: p.pitch ?? 0,
+          kickPitch: 2 * (p.punchX ?? 0) * DEG,
+          kickYaw: 2 * (p.punchY ?? 0) * DEG,
+        },
+        elapsed,
+      );
     }
     this.bomb.visible = !!f.bomb;
     if (f.bomb) this.bomb.position.set(f.bomb.x, f.bomb.y + 0.09, f.bomb.z);
@@ -2519,17 +2422,20 @@ export class GameRenderer {
           (b.ttl / b.max) * 0.66;
       }
     }
-    if (this.currentGun !== f.weapon) {
+    this.viewId = f.viewId;
+    const viewTeam = f.actors.find((a) => a.id === f.viewId)?.team ?? "CT",
+      gunKey = viewTeam + ":" + f.weapon;
+    if (this.currentGun !== gunKey) {
       const old = this.arsenal.get(this.currentGun);
       if (old) old.visible = false;
-      if (!this.arsenal.has(f.weapon)) {
-        const rig = heldWeapon(f.weapon);
-        this.arsenal.set(f.weapon, rig);
+      if (!this.arsenal.has(gunKey)) {
+        const rig = heldWeapon(f.weapon, viewTeam);
+        this.arsenal.set(gunKey, rig);
         this.hands.add(rig);
       }
-      this.currentGun = f.weapon;
+      this.currentGun = gunKey;
     }
-    const rig = this.arsenal.get(f.weapon),
+    const rig = this.arsenal.get(gunKey),
       reload = Math.max(0, Math.min(1, f.reload ?? 0)),
       dip = Math.sin(reload * Math.PI);
     if (rig) {
@@ -2549,10 +2455,25 @@ export class GameRenderer {
         -0.205 + Math.cos(t * 13) * 0.006 * move - 0.13 * dip,
         short ? -0.43 : -0.36,
       );
-      rig.rotation.set(
-        0.065 + Math.min(0.22, k * 0.045) - dip * 0.63,
-        -0.1,
-        0.028 + dip * 0.51,
+      // Recoil moves the weapon, not the bullets: it turns by the same on-screen angle the
+      // bullets drift from the crosshair, so the barrel always points where the next round goes.
+      const lens =
+          Math.tan((this.handsCam.fov * DEG) / 2) /
+          Math.tan((this.camera.fov * DEG) / 2),
+        aimPitch = Math.atan(Math.tan(f.aim?.pitch ?? 0) * lens),
+        aimYaw = Math.atan(Math.tan(f.aim?.yaw ?? 0) * lens),
+        shove = k * k * (kickScale[f.weapon] ?? 1);
+      rig.position.z += 0.05 * shove;
+      rig.position.y += 0.008 * shove;
+      rig.quaternion.setFromEuler(
+        this.baseTurn.set(
+          0.065 + 0.05 * shove - dip * 0.63,
+          -0.1,
+          0.028 + dip * 0.51,
+        ),
+      );
+      rig.quaternion.premultiply(
+        this.recoilQuat.setFromEuler(this.recoilTurn.set(aimPitch, -aimYaw, 0)),
       );
       if (f.weapon === "knife" && (f.swing ?? 1) < 1 && !f.reducedMotion) {
         // Slash sweeps right-to-left; the heavy stab drives forward.
@@ -2567,15 +2488,33 @@ export class GameRenderer {
         }
       }
       rig.scale.setScalar(1.12);
+      rig.updateMatrixWorld(true);
+      this.handsMuzzle
+        .copy(rig.userData.muzzle as THREE.Vector3)
+        .applyMatrix4(rig.matrixWorld);
       this.viewFlash -= elapsed;
       this.muzzleLight.visible =
         this.viewFlash > 0 && rig.visible && !f.reducedMotion;
-      this.muzzleLight.position.set(
-        rig.position.x - 0.018,
-        rig.position.y + 0.066,
-        rig.position.z - (short ? 0.26 : 0.47),
-      );
-    }
+      this.muzzleLight.position.copy(this.handsMuzzle);
+      this.muzzleLight.position.z -= 0.02;
+      // The same screen point in the world, at the muzzle's distance: tracers leave the barrel.
+      this.camera.updateMatrixWorld();
+      this.ndc.copy(this.handsMuzzle).project(this.handsCam);
+      this.viewMuzzle
+        .set(this.ndc.x, this.ndc.y, 0.5)
+        .unproject(this.camera)
+        .sub(this.camera.position)
+        .normalize()
+        .multiplyScalar(Math.max(0.2, this.handsMuzzle.length()))
+        .add(this.camera.position);
+      this.firstPerson = rig.visible;
+      for (const trace of this.tracers)
+        if (trace.local && trace.ttl > 0) {
+          const a = trace.line.geometry.getAttribute("position");
+          a.setXYZ(0, this.viewMuzzle.x, this.viewMuzzle.y, this.viewMuzzle.z);
+          a.needsUpdate = true;
+        }
+    } else this.firstPerson = false;
     this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
     this.renderer.clearDepth();

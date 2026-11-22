@@ -333,9 +333,9 @@ export async function createGame(
     hud?.event(e);
     audio.play(e);
     if (e.type === "shot" && e.pos && e.end)
-      renderer?.shot(e.pos, e.end, e.weapon, e.actor === s.me.id);
+      renderer?.shot(e.pos, e.end, e.weapon, e.actor);
     if (e.type === "tracer" && e.pos && e.end)
-      renderer?.shot(e.pos, e.end, "pellet", false);
+      renderer?.shot(e.pos, e.end, "pellet", e.actor);
     if (e.type === "kill" && e.victim !== undefined && e.dir) {
       // Topple away from the attacker, but pick a direction with room to fall.
       const v = s.players[e.victim],
@@ -947,6 +947,11 @@ export async function createGame(
       spectating: !me.alive || fly,
       reducedMotion: reduced.matches,
       kick: Math.max(0, 1 - (s.time - watched.lastFire) / 0.12),
+      // Bullets fly at view + 2 x punch while the camera shows 0.45 x punch; the gun covers the rest.
+      aim: {
+        pitch: (watched.punchX * 1.55 * Math.PI) / 180,
+        yaw: (watched.punchY * 1.55 * Math.PI) / 180,
+      },
       swing:
         weapon === "knife"
           ? Math.min(1, (s.time - watched.lastFire) / (watched.heavy ? 0.5 : 0.32))
