@@ -56,6 +56,8 @@ export class Player {
   lastFire = -20;
   nextFire = 0;
   reloadEnd = 0;
+  /** When the current reload (or, for shotguns, the current shell) began. */
+  reloadFrom = 0;
   drawEnd = 0;
   index = 0;
   punchX = 0;

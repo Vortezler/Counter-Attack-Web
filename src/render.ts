@@ -45,6 +45,8 @@ export interface RenderFrame {
   heavy?: boolean;
   /** Weapon inspect progress from 0 to 1, when the viewed player is inspecting. */
   inspect?: number;
+  /** The weapon loads shell by shell; `reload` is then the progress of the current shell. */
+  shells?: boolean;
   /** Someone kneeling at the bomb: seconds in, 0..1 done, and whether a defuser has a kit. */
   task?: { actor: number; kind: "plant" | "defuse"; age: number; progress: number; kit: boolean };
   /** Weapons, grenades and kits lying on the ground. */
@@ -647,6 +649,8 @@ function addHand(
   left: boolean,
   fist?: THREE.Group,
   point = false,
+  /** Carry the forearm with `fist`, so the whole hand and arm can be animated together. */
+  carry = false,
 ) {
   const ct = team === "CT",
     c = ct ? palettes.CT : palettes.T;
@@ -657,6 +661,7 @@ function addHand(
     arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
     // A hand that holds the knife is built in its own wrist-bent frame around the palm.
     if (fist) x = y = z = 0;
+    if (fist && carry) arm.position.set(left ? -0.051 : 0.06, -0.122, 0.135);
     const palm = piece(host, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), c.glove, x, y, z);
     palm.rotation.x = 0.24;
     // Fingers wrap across the front of the grip; the thumb closes over the top.
@@ -679,7 +684,7 @@ function addHand(
     thumb.rotation.set(-0.7, 0, s * 0.4);
     part(host, 0.012, 0.06, 0.05, ct ? "#1b1e1f" : "#2c2720", x + s * 0.031, y + 0.004, z - 0.004);
     arm.rotation.set(-0.91, 0, left ? -0.3 : 0.36);
-    rig.add(arm);
+    (fist && carry ? fist : rig).add(arm);
     if (ct) {
       piece(arm, new THREE.CylinderGeometry(0.052, 0.08, 0.35, 14), left ? "#53626a" : palettes.CT.shirt, 0, 0, 0);
       piece(arm, new THREE.CylinderGeometry(0.047, 0.05, 0.05, 14), c.glove, 0, 0.17, 0);
@@ -725,14 +730,192 @@ function heldWeapon(id: string, team: Team) {
     "knife",
   ].includes(id);
   // A knife is held one-handed, so the off hand stays out of the swing.
-  if (id !== "knife")
-    hand(
-      small ? -0.043 : -0.038,
-      small ? -0.104 : -0.038,
-      small ? -0.025 : -0.195,
-      true,
-    );
+  if (id !== "knife") {
+    // The off hand is its own group (with its forearm) so it can fetch magazines and shells.
+    const off = new THREE.Group();
+    off.position.set(small ? -0.043 : -0.038, small ? -0.104 : -0.038, small ? -0.025 : -0.195);
+    rig.add(off);
+    addHand(rig, team, off.position.x, off.position.y, off.position.z, true, off, false, true);
+    rig.userData.off = off;
+    rig.userData.offBase = off.position.clone();
+    if (model.userData.textured) reloadProps(rig, model, id);
+  }
   return rig;
+}
+/** Box `b` (in the frame `m` maps to world) as six clipping planes, facing out or in. */
+function boxPlanes(b: THREE.Box3, m: THREE.Matrix4, inward: boolean, out: THREE.Plane[]) {
+  const s = inward ? -1 : 1;
+  out[0].setFromNormalAndCoplanarPoint(V.set(s, 0, 0), P.set(b.max.x, 0, 0)).applyMatrix4(m);
+  out[1].setFromNormalAndCoplanarPoint(V.set(-s, 0, 0), P.set(b.min.x, 0, 0)).applyMatrix4(m);
+  out[2].setFromNormalAndCoplanarPoint(V.set(0, s, 0), P.set(0, b.max.y, 0)).applyMatrix4(m);
+  out[3].setFromNormalAndCoplanarPoint(V.set(0, -s, 0), P.set(0, b.min.y, 0)).applyMatrix4(m);
+  out[4].setFromNormalAndCoplanarPoint(V.set(0, 0, s), P.set(0, 0, b.max.z)).applyMatrix4(m);
+  out[5].setFromNormalAndCoplanarPoint(V.set(0, 0, -s), P.set(0, 0, b.min.z)).applyMatrix4(m);
+}
+const V = new THREE.Vector3(),
+  P = new THREE.Vector3(),
+  NO_PLANES: THREE.Plane[] = [],
+  planes = () => Array.from({ length: 6 }, () => new THREE.Plane());
+/** Gives a copy of `root` its own materials, clipped to the planes in `clip`. */
+function clipped(root: THREE.Object3D, clip: THREE.Plane[], keepInside: boolean) {
+  const mats: THREE.Material[] = [];
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    m.material = (m.material as THREE.Material).clone();
+    m.material.userData = {};
+    m.material.clipIntersection = !keepInside;
+    m.material.clippingPlanes = keepInside ? clip : NO_PLANES;
+    mats.push(m.material);
+  });
+  return mats;
+}
+/**
+ * Reload pieces for a textured gun: the gun's own magazine can be cut away, and two copies of
+ * just the magazine (the old one falling out, the fresh one in the hand) cut from the model.
+ * Shotguns get a shell for the off hand instead.
+ */
+function reloadProps(rig: THREE.Group, model: THREE.Object3D, id: string) {
+  const mag = model.userData.mag as THREE.Box3 | undefined,
+    port = model.userData.port as THREE.Vector3 | undefined;
+  if (mag) {
+    const hole = planes(),
+      gunMats = clipped(model, hole, false),
+      props = [0, 1].map(() => {
+        const copy = model.clone(true),
+          keep = planes();
+        copy.visible = false;
+        clipped(copy, keep, true);
+        rig.add(copy);
+        return { copy, keep };
+      });
+    rig.userData.reload = { kind: "mag", mag, hole, gunMats, props, cut: false };
+  } else if (port) {
+    const shell = new THREE.Group(),
+      hull = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0095, 0.0095, 0.058, 12),
+        new THREE.MeshStandardMaterial({ color: "#a3241c", roughness: 0.5 }),
+      ),
+      base = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0105, 0.0105, 0.014, 12),
+        new THREE.MeshStandardMaterial({ color: "#c9a24a", roughness: 0.3, metalness: 0.9 }),
+      );
+    base.position.y = -0.034;
+    shell.add(hull, base);
+    shell.visible = false;
+    rig.add(shell);
+    rig.userData.reload = { kind: "shell", port, shell };
+  } else rig.userData.reload = { kind: "hand" };
+  void id;
+}
+type MagReload = {
+  kind: "mag";
+  mag: THREE.Box3;
+  hole: THREE.Plane[];
+  gunMats: THREE.Material[];
+  props: { copy: THREE.Object3D; keep: THREE.Plane[] }[];
+  cut: boolean;
+};
+type ShellReload = { kind: "shell"; port: THREE.Vector3; shell: THREE.Group };
+/** Smoothstep between two progress marks. */
+const between = (p: number, a: number, b: number) => {
+  const x = Math.min(1, Math.max(0, (p - a) / (b - a)));
+  return x * x * (3 - 2 * x);
+};
+/** Piecewise path through key poses [progress, point], eased between each pair. */
+function path3(p: number, keys: [number, THREE.Vector3][], out: THREE.Vector3) {
+  out.copy(keys[0][1]);
+  for (let i = 1; i < keys.length; i++)
+    if (p >= keys[i - 1][0]) out.copy(keys[i - 1][1]).lerp(keys[i][1], between(p, keys[i - 1][0], keys[i][0]));
+  return out;
+}
+/**
+ * Places the off hand, magazines and shell for reload progress `p` (0..1; for a shotgun, of
+ * the shell being loaded), and tips the gun. Returns whether it handled the reload.
+ */
+function poseReload(rig: THREE.Group, p: number, loading: boolean) {
+  const data = rig.userData.reload as MagReload | ShellReload | { kind: "hand" } | undefined,
+    off = rig.userData.off as THREE.Group | undefined,
+    base = rig.userData.offBase as THREE.Vector3 | undefined;
+  if (!data || !off || !base) return false;
+  off.position.copy(base);
+  off.rotation.set(0, 0, 0);
+  if (data.kind === "mag") {
+    for (const prop of data.props) prop.copy.visible = false;
+    data.cut = false;
+  }
+  if (data.kind === "shell") data.shell.visible = false;
+  if (!loading) return true;
+  if (data.kind === "shell") {
+    // Tipped over to show the loading port; each shell comes up from the belt and is thumbed in.
+    rig.position.x -= 0.06;
+    rig.position.y += 0.09;
+    rig.rotation.y += 0.25;
+    // Rolled so the underside (and its loading port) turns toward you.
+    rig.rotation.z -= 0.75;
+    rig.rotation.x += 0.15;
+    const port = data.port,
+      under = new THREE.Vector3(port.x - 0.01, port.y - 0.075, port.z + 0.02),
+      pouch = new THREE.Vector3(port.x - 0.1, port.y - 0.3, port.z + 0.14);
+    path3(p, [[0, pouch], [0.4, under], [0.62, under.clone().setY(port.y - 0.045)], [1, pouch]], off.position);
+    if (p < 0.62) {
+      data.shell.visible = true;
+      data.shell.position.copy(off.position).add(V.set(0.005, 0.06, -0.012));
+      data.shell.rotation.set(0, 0, 0);
+    }
+    return true;
+  }
+  // Bring the gun up and in, rolled so the magazine well faces you.
+  const tilt = between(p, 0, 0.12) * (1 - between(p, 0.84, 1));
+  rig.position.x -= 0.07 * tilt;
+  rig.position.y += 0.1 * tilt;
+  rig.position.z -= 0.04 * tilt;
+  rig.rotation.y += 0.14 * tilt;
+  rig.rotation.z -= 0.42 * tilt;
+  rig.rotation.x += 0.16 * tilt;
+  if (data.kind === "hand") {
+    // No magazine (the revolver): the hand works the gun and returns.
+    const at = new THREE.Vector3(0, -0.04, -0.06);
+    path3(p, [[0, base], [0.2, at], [0.75, at], [0.9, base]], off.position);
+    return true;
+  }
+  const m = data.mag,
+    hold = new THREE.Vector3((m.min.x + m.max.x) / 2 - 0.01, m.min.y + 0.025, (m.min.z + m.max.z) / 2 + 0.01),
+    low = hold.clone().add(V.set(0, -0.09, 0)),
+    pouch = hold.clone().add(V.set(-0.12, -0.34, 0.12));
+  // Grab the magazine, strip it, reach down for a fresh one, seat it, back to the handguard.
+  path3(
+    p,
+    [[0, base], [0.12, hold], [0.2, hold], [0.36, pouch], [0.5, low], [0.62, hold], [0.66, hold.clone().add(V.set(0, 0.008, 0))], [0.8, base]],
+    off.position,
+  );
+  data.cut = p >= 0.2 && p < 0.64;
+  if (p >= 0.2 && p < 0.44) {
+    const old = data.props[0].copy,
+      fall = (p - 0.2) * 3.2;
+    old.visible = true;
+    old.position.set(0, -0.55 * fall * fall - 0.01, 0.02 * fall);
+    old.rotation.set(0.5 * fall, 0, -0.3 * fall);
+  }
+  if (p >= 0.36 && p < 0.64) {
+    const fresh = data.props[1].copy;
+    fresh.visible = true;
+    fresh.position.copy(off.position).sub(hold);
+    fresh.rotation.set(0, 0, 0);
+  }
+  return true;
+}
+/** After the rig's matrices are final: move the clipping boxes onto the gun and the props. */
+function clipReload(rig: THREE.Group) {
+  const data = rig.userData.reload as MagReload | undefined;
+  if (data?.kind !== "mag") return;
+  if (data.cut) boxPlanes(data.mag, rig.matrixWorld, false, data.hole);
+  for (const mat of data.gunMats) {
+    const want = data.cut ? data.hole : NO_PLANES;
+    if (mat.clippingPlanes !== want) mat.clippingPlanes = want;
+  }
+  for (const prop of data.props)
+    if (prop.copy.visible) boxPlanes(data.mag, prop.copy.matrixWorld, true, prop.keep);
 }
 /** A small LED panel drawn from a canvas; `draw` repaints it. */
 function screen(w: number, h: number) {
@@ -2345,6 +2528,8 @@ export class GameRenderer {
       Math.min(window.devicePixelRatio || 1, quality === "low" ? 1.15 : 1.6),
     );
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    // Reloads cut the magazine out of a gun model with per-material clipping planes.
+    this.renderer.localClippingEnabled = true;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.05;
     this.renderer.autoClear = false;
@@ -3171,7 +3356,8 @@ export class GameRenderer {
     }
     const rig = this.arsenal.get(gunKey),
       reload = Math.max(0, Math.min(1, f.reload ?? 0)),
-      dip = Math.sin(reload * Math.PI);
+      animated = !!rig?.userData.reload && !f.reducedMotion,
+      dip = animated ? 0 : Math.sin(reload * Math.PI);
     if (rig) {
       rig.visible = !zoom && !f.spectating && !job;
       const short = [
@@ -3223,6 +3409,7 @@ export class GameRenderer {
           rig.rotation.y += 0.6 * s;
         }
       }
+      if (animated) poseReload(rig, reload, reload > 0);
       const ins = f.inspect;
       let twist = 0;
       if (ins !== undefined && ins < 1 && !f.reducedMotion) {
@@ -3258,6 +3445,7 @@ export class GameRenderer {
           .multiply(this.recoilQuat.setFromAxisAngle(UP, twist));
       rig.scale.setScalar(1.12);
       rig.updateMatrixWorld(true);
+      if (animated) clipReload(rig);
       this.handsMuzzle
         .copy(rig.userData.muzzle as THREE.Vector3)
         .applyMatrix4(rig.matrixWorld);

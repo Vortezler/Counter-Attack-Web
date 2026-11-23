@@ -1,4 +1,5 @@
 import type { SimEvent } from "./sim/Sim";
+import { catalog, isGun } from "./config/weapons";
 import type { Vec3 } from "./world";
 
 interface GunVoice {
@@ -99,6 +100,15 @@ const guns: Record<string, GunVoice> = {
   },
 };
 /**
+ * How loud a sound `d` metres away is: full within 2.5 m, then falling off a little faster than
+ * inverse distance, and fading smoothly to silence over the last 40% of its `reach`.
+ */
+export function falloff(d: number, reach: number) {
+  const near = Math.min(1, (2.5 / Math.max(d, 0.01)) ** 1.15),
+    k = Math.min(1, Math.max(0, (d - reach * 0.6) / (reach * 0.4)));
+  return near * (1 - k * k * (3 - 2 * k));
+}
+/**
  * Spatial voices are synthesized from a reusable noise buffer, oscillators, a
  * soft-clipping shaper for punch and a generated convolution reverb for the room tail.
  */
@@ -115,8 +125,12 @@ export class GameAudio {
   private lastWhiz = 0;
   private ear: Vec3 = { x: 0, y: 0, z: 0 };
   private sources = new Set<AudioScheduledSourceNode>();
-  private obstructions = new Map<number, { time: number; blocked: boolean }>();
-  constructor(public occluded?: (listener: Vec3, source: Vec3) => boolean) {}
+  private obstructions = new Map<string, { time: number; amount: number }>();
+  /**
+   * `occluded` says how blocked the path from listener to source is: 0 in the open, about 0.5
+   * when the sound can bend round a nearby corner or over a low wall, 1 behind solid walls.
+   */
+  constructor(public occluded?: (listener: Vec3, source: Vec3) => number) {}
   get volume() {
     return this.level;
   }
@@ -245,7 +259,9 @@ export class GameAudio {
     const input = ctx.createGain();
     nodes.push(input);
     let output: AudioNode = this.lowPass,
-      range = 0;
+      range = 0,
+      level = 1,
+      echo = 1;
     if (
       e.pos &&
       Math.hypot(
@@ -259,10 +275,8 @@ export class GameAudio {
       if (range > reach) return;
       const pan = ctx.createPanner();
       pan.panningModel = "HRTF";
-      pan.distanceModel = "inverse";
-      pan.refDistance = 4;
-      pan.maxDistance = reach;
-      pan.rolloffFactor = 1.3;
+      // Distance is handled below so the falloff can reach true silence at `reach`.
+      pan.rolloffFactor = 0;
       pan.positionX.value = p.x;
       pan.positionY.value = p.y;
       pan.positionZ.value = p.z;
@@ -275,31 +289,39 @@ export class GameAudio {
       air.connect(output);
       output = air;
       nodes.push(air);
-      const tag = e.actor ?? -1,
+      // Rays are cast at most every 0.1 s per spot (to the nearest metre) and listener spot.
+      const tag = [p.x, p.y, p.z, this.ear.x, this.ear.z].map(Math.round).join(),
         cached = this.obstructions.get(tag);
-      let blocked = false;
+      let blocked = 0;
       if (this.occluded) {
-        if (cached && start - cached.time < 0.1) blocked = cached.blocked;
+        if (cached && start - cached.time < 0.1) blocked = cached.amount;
         else {
           blocked = this.occluded(this.ear, p);
-          this.obstructions.set(tag, { time: start, blocked });
+          if (this.obstructions.size > 200) this.obstructions.clear();
+          this.obstructions.set(tag, { time: start, amount: blocked });
         }
       }
-      if (blocked) {
+      if (blocked > 0) {
+        // Round a corner the sound loses its top end; through walls it is a dull thud.
         const wall = ctx.createBiquadFilter();
         wall.type = "lowpass";
-        wall.frequency.value = 680;
+        wall.frequency.value = blocked >= 1 ? 520 : 1500;
         wall.Q.value = 0.6;
         wall.connect(output);
         output = wall;
         nodes.push(wall);
       }
+      level = falloff(range, reach) * (blocked >= 1 ? 0.3 : blocked > 0 ? 0.62 : 1);
+      echo = falloff(range, reach) ** 0.55 * (blocked >= 1 ? 0.55 : 1);
     }
-    input.connect(output);
+    const loudness = ctx.createGain();
+    loudness.gain.value = level;
+    nodes.push(loudness);
+    input.connect(loudness).connect(output);
     if (this.reverb) {
       const send = ctx.createGain();
       send.gain.value =
-        (options.wet ?? 0.25) * (0.6 + Math.min(1.6, range / 30));
+        (options.wet ?? 0.25) * (0.6 + Math.min(1.6, range / 30)) * echo;
       input.connect(send).connect(this.reverb);
       nodes.push(send);
     }
@@ -675,7 +697,7 @@ export class GameAudio {
           this.hiss(out, n, t + toe, 0.03, 4800 * r, 0.04, "highpass", 0.7);
         }
       },
-      { wet: kind === "metal" ? 0.16 : 0.08, reach: 40 },
+      { wet: kind === "metal" ? 0.16 : 0.08, reach: 32 },
     );
   }
   /** Plays a sim event; `floor` is the material under a footstep, when the caller knows it. */
@@ -684,17 +706,34 @@ export class GameAudio {
     if (e.type === "shot" || e.type === "tracer") this.nearMiss(e);
     if (e.type === "shot") this.gunshot(e);
     else if (e.type === "step") this.step(e, floor ?? e.message ?? "concrete"); else if (e.type === "reload") {
+      // Timed to the reload animation: release and drop, insert, then the bolt or charging handle.
+      const g = e.weapon && isGun(e.weapon) ? e.weapon : "ak",
+        T = catalog[g].reload;
+      if (g === "nova" || g === "xm") return; // shells are voiced one by one
       this.voice(
         e,
-        1,
+        T,
         (out, n, t) => {
-          this.click(out, n, t + 0.05, 0.18, 2400);
-          this.hiss(out, n, t + 0.09, 0.08, 900, 0.1, "bandpass");
-          this.click(out, n, t + 0.5, 0.22, 1700);
-          this.tone(out, n, t + 0.5, 0.05, 220, 110, 0.12);
-          this.click(out, n, t + 0.82, 0.2, 3000);
+          this.click(out, n, t + T * 0.16, 0.18, 2400);
+          this.hiss(out, n, t + T * 0.2, 0.08, 900, 0.1, "bandpass");
+          this.tone(out, n, t + T * 0.34, 0.06, 160, 70, 0.08);
+          this.click(out, n, t + T * 0.66, 0.24, 1700);
+          this.tone(out, n, t + T * 0.66, 0.05, 220, 110, 0.12);
+          this.click(out, n, t + T * 0.8, 0.2, 3000);
+          this.click(out, n, t + T * 0.84, 0.16, 2200);
         },
         { wet: 0.08, reach: 30 },
+      );
+    } else if (e.type === "shell") {
+      this.voice(
+        e,
+        0.25,
+        (out, n, t) => {
+          this.click(out, n, t, 0.16, 2600);
+          this.tone(out, n, t + 0.02, 0.05, 340, 180, 0.07);
+          this.click(out, n, t + 0.07, 0.1, 1500);
+        },
+        { wet: 0.06, reach: 28 },
       );
     } else if (e.type === "bounce") {
       this.voice(

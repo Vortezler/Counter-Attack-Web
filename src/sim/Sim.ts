@@ -110,6 +110,12 @@ export interface Drop {
   reserve?: number;
 }
 export const DROP_REACH = 1.1;
+/** Guns loaded a shell at a time rather than by magazine. */
+export const shellFed = (g: Gun) => g === "nova" || g === "xm";
+/** Seconds to load one shell: the gun's full reload time spread over its tube. */
+export const shellTime = (g: Gun) => catalog[g].reload / catalog[g].mag;
+/** How fast recoil springs back toward centre, per second (95% back in about 0.4 s). */
+export const RECOIL_RETURN = 7.5;
 export const SMOKE_TIME = 18,
   FIRE_TIME = 7;
 type Hits = Map<
@@ -522,24 +528,49 @@ export class Sim {
         this.move(p, working ? { ...cmd, moveX: 0, moveZ: 0, jump: false } : cmd);
       if (p.reloadEnd && this.time >= p.reloadEnd) {
         const m = p.mag;
-        if (m) {
-          const amount = Math.min(m.reserve, catalog[m.id].mag - m.ammo);
-          m.ammo += amount;
-          m.reserve -= amount;
+        if (m && shellFed(m.id)) {
+          // Shotguns load one shell at a time and keep going until full or out of shells.
+          if (m.reserve > 0 && m.ammo < catalog[m.id].mag) {
+            m.ammo++;
+            m.reserve--;
+            this.emit({ type: "shell", actor: p.id, pos: p.eye, weapon: m.id });
+          }
+          const more = m.ammo < catalog[m.id].mag && m.reserve > 0;
+          p.reloadFrom = this.time;
+          p.reloadEnd = more ? this.time + shellTime(m.id) : 0;
+        } else {
+          // A fresh magazine goes in on top of whatever is still in the chamber (0 or 1).
+          if (m) {
+            const amount = Math.min(m.reserve, catalog[m.id].mag);
+            m.ammo += amount;
+            m.reserve -= amount;
+          }
+          p.reloadEnd = 0;
         }
-        p.reloadEnd = 0;
       }
+      const shells = !!p.mag && shellFed(p.mag.id);
       if (
-        cmd.reload &&
+        // Reload on request, or by itself once the gun runs dry (after the last shot cycles).
+        (cmd.reload || (p.mag?.ammo === 0 && this.time >= p.nextFire && p.drawEnd <= this.time)) &&
         !p.reloadEnd &&
         p.mag &&
-        p.mag.ammo < catalog[p.mag.id].mag &&
+        // A magazine gun can top up to a full magazine plus one in the chamber.
+        p.mag.ammo < catalog[p.mag.id].mag + (shells ? 0 : 1) &&
         p.mag.reserve
       ) {
-        p.reloadEnd = this.time + catalog[p.mag.id].reload;
+        if (!shells) {
+          // The partly used magazine comes out (its rounds go back to the reserve); a round
+          // already chambered stays, and can still be fired while the new magazine goes in.
+          const chambered = Math.min(1, p.mag.ammo);
+          p.mag.reserve += p.mag.ammo - chambered;
+          p.mag.ammo = chambered;
+        }
+        p.reloadFrom = this.time;
+        // A shotgun's first shell goes in after it is tipped up to the loading port.
+        p.reloadEnd = this.time + (shellFed(p.mag.id) ? shellTime(p.mag.id) + 0.25 : catalog[p.mag.id].reload);
         p.burstLeft = 0;
         p.scoped = 0;
-        this.emit({ type: "reload", actor: p.id, pos: p.eye });
+        this.emit({ type: "reload", actor: p.id, pos: p.eye, weapon: p.mag.id });
       }
       if (
         active &&
@@ -716,18 +747,15 @@ export class Sim {
       if (p.alive && p.team !== source.team && distance(p, source) < radius)
         p.heard = { x: source.x, y: source.y, z: source.z };
   }
+  /** The aim always springs back toward centre; each shot's kick (in `fire`) works against it. */
   recover(p: Player) {
     p.penalty *= Math.exp(-DT * 5);
-    const pattern = isGun(p.weapon) ? patterns[p.weapon] : [[0, 0]];
     const recent =
       isGun(p.weapon) && this.time - p.lastFire < catalog[p.weapon].reset;
     if (!recent) p.index = 0;
-    const target = recent
-        ? pattern[Math.min(p.index, pattern.length - 1)]
-        : [0, 0],
-      k = 1 - Math.exp(-DT * (recent ? 35 : 6));
-    p.punchX += (target[0] - p.punchX) * k;
-    p.punchY += (target[1] - p.punchY) * k;
+    const k = Math.exp(-DT * RECOIL_RETURN);
+    p.punchX *= k;
+    p.punchY *= k;
   }
   spread(p: Player, g: Gun) {
     const w = catalog[g],
@@ -745,7 +773,13 @@ export class Sim {
     );
   }
   operateWeapon(p: Player, c: PlayerCommand) {
-    if (p.drawEnd > this.time || p.reloadEnd) return;
+    if (p.drawEnd > this.time) return;
+    if (p.reloadEnd) {
+      // Shell by shell, a shotgun can stop loading and fire whatever is already in the tube;
+      // a magazine gun can fire its chambered round while the reload carries on.
+      if (!c.fire || !p.mag || p.mag.ammo <= 0) return;
+      if (shellFed(p.mag.id)) p.reloadEnd = 0;
+    }
     if (isNade(p.weapon)) {
       if ((c.fire || c.alt) && !p.windup) p.windup = this.time;
       if (p.windup && !c.fire && !c.alt) {
@@ -800,7 +834,20 @@ export class Sim {
       p.burstLeft--;
       p.nextFire = this.time + (p.burstLeft > 0 ? 0.06 : 0.5);
     } else p.nextFire = Math.max(this.time - DT, p.nextFire) + 60 / w.rpm;
+    // Kick sized so that holding the trigger at full rate lands each bullet on the spray
+    // pattern despite the spring-back; slower fire recovers more between shots.
+    const pattern = patterns[g],
+      at = (i: number) => pattern[Math.min(i, pattern.length - 1)],
+      held = Math.exp(-RECOIL_RETURN * (burst ? 0.06 : 60 / w.rpm)),
+      prev = p.index ? at(p.index - 1) : [0, 0];
+    p.punchX += at(p.index)[0] - prev[0] * held;
+    p.punchY += at(p.index)[1] - prev[1] * held;
     this.shoot(p, g);
+    // The first bullet goes where you aim, but you still feel it: a small kick that springs back.
+    if (!p.index) {
+      p.punchX += at(1)[0] * 0.6;
+      p.punchY += at(1)[1] * 0.6;
+    }
     p.lastFire = this.time;
     p.index++;
     p.penalty += w.spread[4] + (burst ? 0.35 : 0);
@@ -1213,6 +1260,27 @@ export class Sim {
       lastVy: v.y,
     });
     this.equip(p, p.primary?.id ?? p.pistol.id);
+  }
+  /**
+   * How blocked sound from `b` is on its way to `a`: 0 with a clear line, 0.5 if it can bend
+   * round a corner or over a wall within a couple of metres of the source, 1 otherwise.
+   */
+  occlusion(a: Vec3, b: Vec3) {
+    if (this.visible(a, b, false)) return 0;
+    const dx = b.x - a.x,
+      dz = b.z - a.z,
+      len = Math.hypot(dx, dz) || 1,
+      sx = (-dz / len) * 1.8,
+      sz = (dx / len) * 1.8;
+    for (const [ox, oy, oz] of [
+      [sx, 0, sz],
+      [-sx, 0, -sz],
+      [0, 2.4, 0],
+    ]) {
+      const via = { x: b.x + ox, y: b.y + oy, z: b.z + oz };
+      if (this.visible(a, via, false) && this.visible(via, b, false)) return 0.5;
+    }
+    return 1;
   }
   visible(a: Vec3, b: Vec3, smoke = true) {
     const x = b.x - a.x,

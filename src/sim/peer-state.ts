@@ -55,7 +55,7 @@ export function projectFrame(sim: Sim, compact = false) {
       ...Object.fromEntries(numeric.map(k => [k, number(p[k])])),
       ...Object.fromEntries(flags.map(k => [k, p[k]])),
       team: p.team, weapon: p.weapon, primary: p.primary, pistol: p.pistol, crouched: p.crouched,
-      vy: number(p.vy), jumpHeld: !!p.lastCmd.jump, glockBurst: p.glockBurst,
+      vy: number(p.vy), jumpHeld: !!p.lastCmd.jump, glockBurst: p.glockBurst, reloadFrom: p.reloadFrom,
     })),
   };
 }
@@ -142,6 +142,8 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
     target.primary = p.primary as Magazine | null;
     target.body.crouch = p.crouched as boolean;
     target.vy = finite(p.vy) ? p.vy : 0;
+    // Optional so an older host's frames still apply.
+    if (finite(p.reloadFrom)) target.reloadFrom = p.reloadFrom;
     target.glockBurst = p.glockBurst === true;
     target.lastCmd = { ...target.lastCmd, jump: p.jumpHeld === true };
   }
@@ -161,7 +163,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
 export function readEvent(value: unknown): SimEvent | null {
   if (!record(value) || typeof value.type !== "string" ||
       !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step",
-        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash", "blood", "pickup"].includes(value.type)) return null;
+        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash", "blood", "pickup", "shell"].includes(value.type)) return null;
   const event: SimEvent = { type: value.type };
   for (const key of ["actor", "victim"] as const) {
     const index = value[key];

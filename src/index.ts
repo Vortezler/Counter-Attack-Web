@@ -73,7 +73,7 @@ export async function createGame(
   container.append(root);
   const lifetime = new AbortController(),
     signal = lifetime.signal;
-  const audio = new GameAudio((a, b) => !!sim && !sim.visible(a, b, false));
+  const audio = new GameAudio((a, b) => (sim ? sim.occlusion(a, b) : 0));
   let choice: MenuChoice = {
     map: opts.map ?? "dust2",
     side: opts.side ?? "CT",
@@ -1028,10 +1028,12 @@ export async function createGame(
           ? Math.min(1, (s.time - inspecting.at) / (weapon === "knife" ? 2.4 : 2.8))
           : undefined,
       move: Math.min(1, Math.hypot(watched.vx, watched.vz) / 6),
+      // Progress through the reload, or for a shotgun through the shell being loaded.
       reload:
         watched.reloadEnd && isGun(weapon)
-          ? 1 - (watched.reloadEnd - s.time) / catalog[weapon].reload
+          ? Math.min(1, Math.max(0, (s.time - watched.reloadFrom) / Math.max(0.05, watched.reloadEnd - watched.reloadFrom)))
           : 0,
+      shells: weapon === "nova" || weapon === "xm",
       alpha,
       bomb: s.bomb,
       grenades: network && !host ? remoteGrenades : s.grenades.map((g) => ({

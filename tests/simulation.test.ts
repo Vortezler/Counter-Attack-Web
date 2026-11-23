@@ -142,8 +142,10 @@ it("handles fire cadence, reload, recoil reset, and dropped bomb recovery", () =
   step(s, 32);
   expect(p.index).toBe(0);
   s.step({ 0: { ...idle(), reload: true } });
+  // The chambered round stays while the magazine comes out.
+  expect(m.ammo).toBe(1);
   step(s, 160);
-  expect(m.ammo).toBe(30);
+  expect(m.ammo).toBe(31);
   s.hurt(p, 150, null, "bomb");
   expect(s.bomb).toBeTruthy();
   place(s, 1, s.bomb!);

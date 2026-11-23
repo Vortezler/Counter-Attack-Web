@@ -42,7 +42,8 @@ test("selects a map and side, buys gear, moves, fires, pauses, and returns to se
   await page.mouse.up();
   await expect(page.locator("[data-ui=ammo]")).toHaveText("6");
   await page.keyboard.press("r");
-  await expect(page.locator("[data-ui=ammo]")).toHaveText("7", {
+  // A fresh magazine plus the round still chambered: 7 + 1.
+  await expect(page.locator("[data-ui=ammo]")).toHaveText("8", {
     timeout: 15000,
   });
   await page.keyboard.down("Tab");
