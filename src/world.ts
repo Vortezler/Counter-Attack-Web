@@ -907,3 +907,26 @@ export const maps: Record<MapId, MapDef> = {
   vertigo: gridMap(vertigo),
   range: firingRange(),
 };
+
+/** The material a foot at `y` stands on: the highest surface under (x, z) at or just below it. */
+export function floorAt(map: MapDef, x: number, y: number, z: number): MaterialId {
+  let best: MaterialId = map.boxes[0]?.mat ?? "concrete",
+    top = -Infinity;
+  for (const b of map.boxes) {
+    if (Math.abs(x - b.x) > b.w / 2 || Math.abs(z - b.z) > b.d / 2) continue;
+    const t = b.y + b.h / 2;
+    if (t <= y + 0.15 && t > top) {
+      top = t;
+      best = b.mat;
+    }
+  }
+  for (const r of map.ramps) {
+    if (Math.abs(x - r.x) > r.w / 2 || Math.abs(z - r.z) > r.d / 2) continue;
+    // A ramp's surface rises from its base to `h`; any foot within that band is on it.
+    if (y >= r.y - 0.15 && y <= r.y + r.h + 0.15 && r.y + r.h >= top) {
+      top = r.y + r.h;
+      best = r.mat;
+    }
+  }
+  return best;
+}

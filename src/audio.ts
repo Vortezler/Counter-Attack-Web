@@ -614,28 +614,72 @@ export class GameAudio {
       { wet: 0.3, reach: 60 },
     );
   }
-  play(e: SimEvent) {
+  /**
+   * One footfall, voiced for the surface underfoot: a heel strike, then the toe rolling off
+   * 60-75 ms later. Grit crunches, stone clicks, metal rings and wood knocks hollow.
+   */
+  private step(e: SimEvent, floor: string) {
+    const r = 0.92 + Math.random() * 0.16,
+      toe = 0.06 + Math.random() * 0.015,
+      kind =
+        floor === "sand" || floor === "dirt" || floor === "foliage"
+          ? "grit"
+          : floor === "metal"
+            ? "metal"
+            : floor === "wood" || floor === "cardboard"
+              ? "wood"
+              : floor === "stone" || floor === "tile" || floor === "glass"
+                ? "stone"
+                : "concrete";
+    this.voice(
+      e,
+      kind === "metal" ? 0.4 : 0.2,
+      (out, n, t) => {
+        if (kind === "grit") {
+          // Packed sand: a soft muffled press with grains crunching under the sole.
+          this.hiss(out, n, t, 0.14, 1300 * r, 0.2, "lowpass", 0.7, 0.012);
+          this.tone(out, n, t, 0.06, 85 * r, 48, 0.08);
+          for (let i = 0; i < 6; i++)
+            this.hiss(out, n, t + 0.01 + Math.random() * 0.1, 0.007, 3200 + Math.random() * 2600, 0.035 + Math.random() * 0.03, "highpass", 0.7, 0.0008);
+          if (floor === "foliage")
+            this.hiss(out, n, t + 0.02, 0.12, 2600 * r, 0.06, "bandpass", 0.6, 0.02);
+        } else if (kind === "metal") {
+          // Grating and sheet steel: a dull thump with a short metallic ring over it.
+          this.tone(out, n, t, 0.08, 95 * r, 58, 0.13);
+          this.hiss(out, n, t, 0.05, 3300 * r, 0.15, "bandpass", 2);
+          this.tone(out, n, t, 0.26, 430 * r, 410 * r, 0.055, "triangle");
+          this.tone(out, n, t, 0.18, 1160 * r, 1120 * r, 0.03, "triangle");
+          this.hiss(out, n, t + toe, 0.035, 3800 * r, 0.08, "bandpass", 2);
+          this.tone(out, n, t + toe, 0.14, 610 * r, 590 * r, 0.025, "triangle");
+        } else if (kind === "wood") {
+          // Boards and crates: a hollow knock with a body resonance.
+          this.tone(out, n, t, 0.1, 205 * r, 135, 0.15);
+          this.hiss(out, n, t, 0.07, 720 * r, 0.18, "bandpass", 1.5);
+          this.tone(out, n, t + toe, 0.05, 255 * r, 180, 0.07);
+          this.hiss(out, n, t + toe, 0.03, 1500 * r, 0.06, "bandpass", 1.2);
+        } else if (kind === "stone") {
+          // Flagstones, tile and cobbles: a hard heel click and a crisp toe tap.
+          this.tone(out, n, t, 0.04, 175 * r, 90, 0.1);
+          this.hiss(out, n, t, 0.04, 2600 * r, 0.22, "bandpass", 1.6);
+          this.hiss(out, n, t + toe, 0.025, 3300 * r, 0.13, "bandpass", 1.6);
+          if (floor === "tile")
+            this.tone(out, n, t, 0.05, 1900 * r, 1860 * r, 0.015, "triangle");
+        } else {
+          // Concrete and plaster: a heel scuff with fine grit, then the toe.
+          this.tone(out, n, t, 0.05, 115 * r, 60, 0.12);
+          this.hiss(out, n, t, 0.06, 1600 * r, 0.2, "bandpass", 1.2);
+          this.hiss(out, n, t + toe, 0.04, 2200 * r, 0.12, "bandpass", 1.2);
+          this.hiss(out, n, t + toe, 0.03, 4800 * r, 0.04, "highpass", 0.7);
+        }
+      },
+      { wet: kind === "metal" ? 0.16 : 0.08, reach: 40 },
+    );
+  }
+  /** Plays a sim event; `floor` is the material under a footstep, when the caller knows it. */
+  play(e: SimEvent, floor?: string) {
     if (!this.ctx || !this.master) return;
     if (e.type === "shot") this.gunshot(e);
-    else if (e.type === "step") {
-      this.voice(
-        e,
-        0.1,
-        (out, n, t) => {
-          this.hiss(
-            out,
-            n,
-            t,
-            0.07,
-            e.message === "metal" ? 3300 : 1150,
-            0.2,
-            "bandpass",
-          );
-          this.tone(out, n, t, 0.055, 105, 55, 0.1);
-        },
-        { wet: 0.08, reach: 40 },
-      );
-    } else if (e.type === "reload") {
+    else if (e.type === "step") this.step(e, floor ?? e.message ?? "concrete"); else if (e.type === "reload") {
       this.voice(
         e,
         1,

@@ -18,7 +18,7 @@ import { compactScreen, nativeApp, onBackButton, touchDevice } from "./platform"
 import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
-import type { MapId } from "./world";
+import type { MapId, floorAt } from "./world";
 import { catalog, isGun } from "./config/weapons";
 import {
   actionFor,
@@ -100,6 +100,9 @@ export async function createGame(
     yaw = 0,
     pitch = 0,
     round = 0;
+  let floorOf: typeof floorAt | undefined;
+  /** A weapon inspect started at sim time `at`; firing, reloading, scoping or switching ends it. */
+  let inspecting: { at: number; weapon: string } | undefined;
   let aimEye = 0,
     slot = 0,
     wantFullscreen = false,
@@ -331,7 +334,13 @@ export async function createGame(
     const s = sim;
     if (!s) return;
     hud?.event(e);
-    audio.play(e);
+    // Footsteps carry only the eye position; the foot is a standing eye height below it.
+    audio.play(
+      e,
+      e.type === "step" && e.pos && floorOf
+        ? floorOf(s.map, e.pos.x, e.pos.y - 1.6256, e.pos.z)
+        : undefined,
+    );
     if (e.type === "shot" && e.pos && e.end)
       renderer?.shot(e.pos, e.end, e.weapon, e.actor);
     if (e.type === "blood") renderer?.bleed(e);
@@ -410,6 +419,7 @@ export async function createGame(
       if (disposed || token !== generation) return;
       const id: MapId = opts.scene ?? c.map;
       const map = world.maps[id];
+      floorOf = world.floorAt;
       sim = new simulation.Sim(
         map,
         c.side,
@@ -801,6 +811,12 @@ export async function createGame(
       reload: tapped("reload"),
       slot,
     };
+    const me = sim?.me;
+    if (
+      me?.alive &&
+      (touchTapped.has("inspect") || binds.inspect.some((c) => presses.has(c)))
+    )
+      inspecting = { at: sim!.time, weapon: me.weapon };
     slot = 0;
     presses.clear();
     touchTapped.clear();
@@ -928,6 +944,16 @@ export async function createGame(
         (watched.punchX * 0.45 * Math.PI) / 180,
     };
     const weapon = watched.weapon;
+    if (
+      inspecting &&
+      (inspecting.weapon !== me.weapon ||
+        me.lastFire >= inspecting.at ||
+        me.reloadEnd > s.time ||
+        me.scoped ||
+        !me.alive ||
+        s.time - inspecting.at > 4)
+    )
+      inspecting = undefined;
     const props = {
       camera: cam,
       actors: s.players,
@@ -958,6 +984,10 @@ export async function createGame(
           ? Math.min(1, (s.time - watched.lastFire) / (watched.heavy ? 0.5 : 0.32))
           : 1,
       heavy: watched.heavy,
+      inspect:
+        inspecting && watched === me
+          ? Math.min(1, (s.time - inspecting.at) / (weapon === "knife" ? 2.4 : 2.8))
+          : undefined,
       move: Math.min(1, Math.hypot(watched.vx, watched.vz) / 6),
       reload:
         watched.reloadEnd && isGun(weapon)

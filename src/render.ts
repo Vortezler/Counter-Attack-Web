@@ -40,6 +40,8 @@ export interface RenderFrame {
   /** Knife swing progress, 0 at the start of an attack and 1 at rest. */
   swing?: number;
   heavy?: boolean;
+  /** Weapon inspect progress from 0 to 1, when the viewed player is inspecting. */
+  inspect?: number;
   reload?: number;
   move?: number;
   time?: number;
@@ -57,7 +59,8 @@ export interface RenderFrame {
   alpha?: number;
 }
 
-const DEG = Math.PI / 180;
+const DEG = Math.PI / 180,
+  UP = new THREE.Vector3(0, 1, 0);
 /** How hard each weapon shoves back into the shoulder per shot (1 = rifle). */
 const kickScale: Partial<Record<string, number>> = {
   awp: 1.9,
@@ -125,29 +128,127 @@ function barrel(
   m.rotation.x = Math.PI / 2;
   return m;
 }
+/**
+ * A tapered steel blade lofted along its length: flat-ground sides from the spine down to a
+ * grind line, then a brighter bevel to a fine edge. The belly sweeps up and the spine clips
+ * down to the point. Flat in the y-z plane, pointing down -z from `z0`.
+ */
+function bladeGeometry(length: number, z0: number) {
+  const N = 32,
+    rows: number[][][] = [];
+  for (let i = 0; i <= N; i++) {
+    const s = (i / N) * length,
+      clip = Math.max(0, (s - 0.12) / (length - 0.12)),
+      belly = Math.max(0, (s - 0.085) / (length - 0.085)),
+      spine = 0.011 - 0.0095 * clip ** 0.9,
+      edge = -0.019 + 0.0205 * (1 - Math.sqrt(Math.max(0, 1 - belly * belly))),
+      height = spine - edge,
+      grind = edge + height * 0.52,
+      t = 0.0021 * (1 - 0.5 * (s / length)) * Math.min(1, height / 0.012),
+      e = 0.00018 * Math.min(1, height / 0.012),
+      z = z0 - s;
+    rows.push([
+      [t, spine, z],
+      [t, grind, z],
+      [e, edge, z],
+      [-e, edge, z],
+      [-t, grind, z],
+      [-t, spine, z],
+    ]);
+  }
+  const strip = (pairs: [number, number][]) => {
+    const pos: number[] = [],
+      index: number[] = [];
+    for (const [a, b] of pairs) {
+      const base = pos.length / 3;
+      for (const row of rows) pos.push(...row[a], ...row[b]);
+      for (let i = 0; i < N; i++) {
+        const k = base + i * 2;
+        index.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(index);
+    geo.computeVertexNormals();
+    return geo;
+  };
+  return {
+    // Each facet is its own strip so it shades smoothly along the blade but keeps crisp ridges.
+    flats: strip([
+      [0, 1],
+      [4, 5],
+      [5, 0],
+    ]),
+    bevels: strip([
+      [1, 2],
+      [2, 3],
+      [3, 4],
+    ]),
+  };
+}
+const steel = (color: number, roughness: number, metalness = 1) =>
+  new THREE.MeshStandardMaterial({ color, roughness, metalness });
+/** A fixed-blade combat knife; the handle runs along z through the origin, the blade forward. */
+function knife(g: THREE.Group) {
+  const { flats, bevels } = bladeGeometry(0.19, -0.048);
+  g.add(new THREE.Mesh(flats, steel(0xaeb4b9, 0.32)));
+  g.add(new THREE.Mesh(bevels, steel(0xe4e8eb, 0.14)));
+  const guard = new THREE.Mesh(
+    new RoundedBoxGeometry(0.017, 0.044, 0.0075, 2, 0.003),
+    steel(0x3b4045, 0.4, 0.85),
+  );
+  guard.position.set(0, -0.004, -0.051);
+  g.add(guard);
+  // Moulded grip: an oval section that swells toward the pommel, with finger ridges near the guard.
+  const profile: THREE.Vector2[] = [];
+  for (let i = 0; i <= 24; i++) {
+    const f = i / 24;
+    profile.push(
+      new THREE.Vector2(
+        0.0118 + 0.0016 * f + 0.0011 * Math.max(0, Math.sin(f * Math.PI * 4.5)) * (1 - f),
+        -0.048 + f * 0.1,
+      ),
+    );
+  }
+  const handle = new THREE.LatheGeometry(profile, 20);
+  handle.rotateX(Math.PI / 2);
+  handle.scale(0.76, 1, 1);
+  handle.translate(0, -0.004, 0);
+  g.add(
+    new THREE.Mesh(
+      handle,
+      new THREE.MeshStandardMaterial({ color: 0x24282a, roughness: 0.82 }),
+    ),
+  );
+  for (const z of [-0.012, 0.012, 0.036]) {
+    const band = new THREE.Mesh(
+      new THREE.TorusGeometry(0.0128 + (z + 0.048) * 0.016, 0.0009, 4, 20),
+      new THREE.MeshStandardMaterial({ color: 0x15181a, roughness: 0.9 }),
+    );
+    band.scale.set(0.79, 1.02, 1);
+    band.position.set(0, -0.004, z);
+    g.add(band);
+  }
+  const pommel = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.0122, 0.0108, 0.011, 18),
+    steel(0x3b4045, 0.4, 0.85),
+  );
+  pommel.rotation.x = Math.PI / 2;
+  pommel.scale.set(0.8, 1, 1);
+  pommel.position.set(0, -0.004, 0.0575);
+  g.add(pommel);
+  const loop = new THREE.Mesh(
+    new THREE.TorusGeometry(0.0045, 0.0013, 6, 14),
+    steel(0x3b4045, 0.4, 0.85),
+  );
+  loop.rotation.y = Math.PI / 2;
+  loop.position.set(0, -0.004, 0.066);
+  g.add(loop);
+}
 function special(id: string, g: THREE.Group) {
   if (id === "knife") {
-    const blade = new THREE.BufferGeometry();
-    // A tapered blade with a clipped point, built flat and extruded slightly.
-    const shape = new THREE.Shape();
-    shape.moveTo(-0.012, 0);
-    shape.lineTo(0.016, 0);
-    shape.lineTo(0.016, -0.17);
-    shape.lineTo(0.004, -0.215);
-    shape.lineTo(-0.012, -0.19);
-    shape.lineTo(-0.012, 0);
-    blade.copy(
-      new THREE.ExtrudeGeometry(shape, { depth: 0.004, bevelEnabled: false }),
-    );
-    blade.rotateX(-Math.PI / 2);
-    blade.rotateZ(Math.PI / 2);
-    piece(g, blade, "#b9bfbd", 0, 0.02, -0.06);
-    part(g, 0.006, 0.022, 0.15, "#8d9391", 0, 0.03, -0.13);
-    part(g, 0.05, 0.016, 0.018, gunmetal, 0, 0.018, -0.055);
-    const handle = part(g, 0.026, 0.03, 0.11, "#2d302c", 0, 0.012, 0.005);
-    for (let i = 0; i < 4; i++)
-      part(handle, 0.028, 0.032, 0.006, "#454a44", 0, 0, -0.04 + i * 0.026);
-    part(g, 0.03, 0.034, 0.014, gunmetal, 0, 0.012, 0.064);
+    knife(g);
     return true;
   }
   if (id === "smoke") {
@@ -515,14 +616,19 @@ function heldWeapon(id: string, team: Team) {
     c = ct ? palettes.CT : palettes.T;
   rig.userData.muzzle = muzzleOf(model);
   rig.add(model);
-  const hand = (x: number, y: number, z: number, left: boolean) => {
-    const s = left ? -1 : 1;
-    const palm = piece(rig, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), c.glove, x, y, z);
+  const hand = (x: number, y: number, z: number, left: boolean, fist?: THREE.Group) => {
+    const s = left ? -1 : 1,
+      host = fist ?? rig,
+      arm = new THREE.Group();
+    arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
+    // A hand that holds the knife is built in its own wrist-bent frame around the palm.
+    if (fist) x = y = z = 0;
+    const palm = piece(host, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), c.glove, x, y, z);
     palm.rotation.x = 0.24;
     // Fingers wrap across the front of the grip; the thumb closes over the top.
     for (let i = 0; i < 4; i++) {
       const finger = piece(
-        rig,
+        host,
         new THREE.CapsuleGeometry(0.0115, 0.034, 3, 8),
         c.glove,
         x - s * 0.01,
@@ -531,11 +637,9 @@ function heldWeapon(id: string, team: Team) {
       );
       finger.rotation.z = Math.PI / 2;
     }
-    const thumb = piece(rig, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), c.glove, x - s * 0.03, y + 0.036, z + 0.008);
+    const thumb = piece(host, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), c.glove, x - s * 0.03, y + 0.036, z + 0.008);
     thumb.rotation.set(-0.7, 0, s * 0.4);
-    part(rig, 0.012, 0.06, 0.05, ct ? "#1b1e1f" : "#2c2720", x + s * 0.031, y + 0.004, z - 0.004);
-    const arm = new THREE.Group();
-    arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
+    part(host, 0.012, 0.06, 0.05, ct ? "#1b1e1f" : "#2c2720", x + s * 0.031, y + 0.004, z - 0.004);
     arm.rotation.set(-0.91, 0, left ? -0.3 : 0.36);
     rig.add(arm);
     if (ct) {
@@ -548,7 +652,21 @@ function heldWeapon(id: string, team: Team) {
       piece(arm, new THREE.CylinderGeometry(0.046, 0.047, 0.04, 14), c.glove, 0, 0.17, 0);
     }
   };
-  hand(0.038, -0.083, 0.033, false);
+  if (id === "knife") {
+    // Hammer grip: the handle runs up through the fist and the wrist cocks the blade forward
+    // and inward, edge toward the fingers.
+    const fist = new THREE.Group();
+    fist.position.set(0.02, -0.04, 0.02);
+    fist.rotation.set(-0.75, 0, 0.3);
+    rig.add(fist);
+    // Rolled about the handle so the flat of the blade catches the light, not just the spine.
+    model.rotation.set(Math.PI / 2, 0, 0.95);
+    model.position.set(-0.008, 0.004, -0.021);
+    fist.add(model);
+    hand(0.02, -0.04, 0.02, false, fist);
+    rig.userData.fist = fist;
+    rig.userData.grip = fist.quaternion.clone();
+  } else hand(0.038, -0.083, 0.033, false);
   const small = [
     "he",
     "flash",
@@ -573,6 +691,10 @@ function flatten(group: THREE.Group) {
   const gs: THREE.BufferGeometry[] = [];
   for (const obj of [...group.children]) {
     if (!(obj instanceof THREE.Mesh)) continue;
+    if ((obj.material as THREE.MeshStandardMaterial).metalness >= 0.8) {
+      obj.castShadow = true;
+      continue;
+    }
     obj.updateMatrix();
     const g = obj.geometry.index
       ? obj.geometry.toNonIndexed()
@@ -1954,6 +2076,9 @@ export class GameRenderer {
     pmrem.dispose();
     this.scene.environment = this.environment;
     this.scene.environmentIntensity = 0.32;
+    // The viewmodel reflects the same soft room, so bare steel reads as metal, not grey paint.
+    this.hands.environment = this.environment;
+    this.hands.environmentIntensity = 0.5;
     this.sun.position.set(map.width * 0.5 - 42, 65, map.depth * 0.5 - 30);
     this.sun.target.position.set(map.width * 0.5, 0, map.depth * 0.5);
     this.sun.castShadow = true;
@@ -2640,6 +2765,39 @@ export class GameRenderer {
           rig.rotation.y += 0.6 * s;
         }
       }
+      const ins = f.inspect;
+      let twist = 0;
+      if (ins !== undefined && ins < 1 && !f.reducedMotion) {
+        // Inspect: lift the weapon toward the middle of the screen and turn it over. The knife
+        // shows one flat of the blade, rolls through the edge and shows the other; a gun shows
+        // its side, then tips to show the top.
+        const ease = (a: number, b: number) => {
+            const x = Math.min(1, Math.max(0, (ins - a) / (b - a)));
+            return x * x * (3 - 2 * x);
+          },
+          a = ease(0, 0.16) * (1 - ease(0.84, 1)),
+          w = ease(0.42, 0.62),
+          sway = Math.sin(ins * Math.PI * 5) * 0.025 * a,
+          blade = f.weapon === "knife";
+        rig.position.x -= (blade ? 0.08 : 0.05) * a;
+        rig.position.y += (blade ? 0.04 : 0.03) * a;
+        rig.position.z += (blade ? 0.02 : -0.05) * a;
+        if (blade) {
+          // The wrist twists about the handle: one flat toward the eye, through the spine, the other.
+          rig.rotateY(0.3 * a + sway);
+          rig.rotateX(0.15 * a);
+          twist = a * (1.25 - 2.75 * w);
+        } else {
+          rig.rotateY(a * (0.42 - 0.15 * w) + sway);
+          rig.rotateZ(a * (0.55 - 0.85 * w));
+          rig.rotateX(a * (0.1 + 0.12 * w) + sway * 0.6);
+        }
+      }
+      const fist = rig.userData.fist as THREE.Object3D | undefined;
+      if (fist)
+        fist.quaternion
+          .copy(rig.userData.grip as THREE.Quaternion)
+          .multiply(this.recoilQuat.setFromAxisAngle(UP, twist));
       rig.scale.setScalar(1.12);
       rig.updateMatrixWorld(true);
       this.handsMuzzle
