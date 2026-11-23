@@ -1,5 +1,5 @@
 import { catalog, isGun, isNade, shop, type Magazine, type Weapon } from "../config/weapons";
-import type { Fire, Sim, SimEvent, Smoke } from "./Sim";
+import type { Drop, Fire, Sim, SimEvent, Smoke } from "./Sim";
 import type { PlayerCommand } from "./player";
 
 export const peerPlayer = 5;
@@ -50,6 +50,7 @@ export function projectFrame(sim: Sim, compact = false) {
       born: c.born, until: c.until })),
     fires: sim.fires.map(f => ({ id: f.id, x: number(f.x), y: number(f.y), z: number(f.z), r: f.r,
       born: f.born, until: f.until, owner: f.owner, team: f.team })),
+    drops: sim.drops.map(d => ({ ...d, x: number(d.x), y: number(d.y), z: number(d.z), yaw: number(d.yaw) })),
     players: sim.players.map(p => ({
       ...Object.fromEntries(numeric.map(k => [k, number(p[k])])),
       ...Object.fromEntries(flags.map(k => [k, p[k]])),
@@ -80,6 +81,21 @@ function readFires(value: unknown): Fire[] | null {
   return fires;
 }
 
+function readDrops(value: unknown): Drop[] | null {
+  if (!Array.isArray(value) || value.length > 64) return null;
+  const drops: Drop[] = [];
+  for (const d of value as Payload[]) {
+    if (!record(d) || !point({ x: d.x, y: d.y, z: d.z }) || !finite(d.x) || !finite(d.y) || !finite(d.z) || !finite(d.id) || !finite(d.yaw) || !finite(d.born)
+      || !(d.item === "kit" || weapon(d.item)) || d.item === "bomb") return null;
+    const drop: Drop = { id: d.id, item: d.item, x: d.x, y: d.y, z: d.z, yaw: d.yaw, born: d.born };
+    if (finite(d.ammo, 200) && finite(d.reserve, 300)) {
+      drop.ammo = d.ammo;
+      drop.reserve = d.reserve;
+    }
+    drops.push(drop);
+  }
+  return drops;
+}
 function magazine(value: unknown): value is Magazine {
   return record(value) && typeof value.id === "string" && Object.hasOwn(catalog, value.id)
     && isGun(value.id as Magazine["id"]) && finite(value.ammo, 200) && finite(value.reserve, 300);
@@ -100,7 +116,8 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
   // Frames from a host without utility sync carry no smokes or fires; treat them as empty.
   const smokes = value.smokes === undefined ? [] : readSmokes(value.smokes);
   const fires = value.fires === undefined ? [] : readFires(value.fires);
-  if (!smokes || !fires) return null;
+  const drops = value.drops === undefined ? [] : readDrops(value.drops);
+  if (!smokes || !fires || !drops) return null;
   const players: Payload[] = value.players;
   for (const p of players) {
     if (!record(p) || !numeric.every(key => finite(p[key])) || !flags.every(key => typeof p[key] === "boolean")
@@ -130,6 +147,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
   }
   sim.smokes = smokes;
   sim.fires = fires;
+  sim.drops = drops;
   Object.assign(sim, { tick: value.tick, time: value.time, left: value.left, round: value.round,
     phase: value.phase, score: value.score, carrier: value.carrier, bomb: value.bomb,
     worker: value.worker, work: value.work, action: value.action, plantedSite: value.plantedSite });
@@ -143,7 +161,7 @@ export function applyFrame(sim: Sim, value: unknown): ReturnType<typeof projectF
 export function readEvent(value: unknown): SimEvent | null {
   if (!record(value) || typeof value.type !== "string" ||
       !["shot", "impact", "explosion", "flash", "kill", "hit", "plant", "roundEnd", "roundStart", "live", "beep", "reload", "step",
-        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash", "blood"].includes(value.type)) return null;
+        "tracer", "smoke", "shatter", "fire", "extinguish", "fireOut", "bounce", "mode", "slash", "blood", "pickup"].includes(value.type)) return null;
   const event: SimEvent = { type: value.type };
   for (const key of ["actor", "victim"] as const) {
     const index = value[key];

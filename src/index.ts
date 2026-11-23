@@ -18,6 +18,7 @@ import { compactScreen, nativeApp, onBackButton, touchDevice } from "./platform"
 import type { PeerMatch } from "./hub/peer-match";
 import type { MatchHud } from "./hud";
 import { GameAudio } from "./audio";
+import { startAmbience, type Ambience } from "./ambience";
 import type { MapId, floorAt } from "./world";
 import { catalog, isGun } from "./config/weapons";
 import {
@@ -78,6 +79,7 @@ export async function createGame(
     side: opts.side ?? "CT",
     difficulty: opts.difficulty ?? "normal",
     mode: opts.mode ?? "competitive",
+    solo: opts.solo ?? false,
     playerName: opts.playerName ?? "Player",
     settings: mergeSettings(),
   };
@@ -101,9 +103,11 @@ export async function createGame(
     pitch = 0,
     round = 0;
   let floorOf: typeof floorAt | undefined;
+  let ambience: Ambience | null = null;
   /** A weapon inspect started at sim time `at`; firing, reloading, scoping or switching ends it. */
   let inspecting: { at: number; weapon: string } | undefined;
   let aimEye = 0,
+    kneel = 0,
     slot = 0,
     wantFullscreen = false,
     wasLocked = false,
@@ -235,6 +239,8 @@ export async function createGame(
     hud = null;
     renderer?.dispose();
     renderer = null;
+    ambience?.stop();
+    ambience = null;
     sim?.dispose();
     sim = null;
     stage?.remove();
@@ -414,29 +420,45 @@ export async function createGame(
         import("./sim/Sim"),
         import("./world"),
         import("./hud"),
+        // Textured gun models; a failed fetch leaves the built-in ones in place.
+        import("./gunModels").then((m) => m.loadGunModels(import.meta.env.BASE_URL)),
       ]);
       await physics.initPhysics();
       if (disposed || token !== generation) return;
       const id: MapId = opts.scene ?? c.map;
       const map = world.maps[id];
       floorOf = world.floorAt;
-      sim = new simulation.Sim(
-        map,
-        c.side,
-        c.difficulty,
-        c.playerName,
-        opts.seed ?? (Math.random() * 0xffffffff) >>> 0,
-        opts.botsOnly,
-        c.mode ?? "competitive",
-      );
+      // Deathmatch and battle royale run on their own rules and HUD (local matches only).
+      const arena =
+        !network && id !== "range" && (c.mode === "deathmatch" || c.mode === "royale")
+          ? await Promise.all([import("./sim/arena"), import("./arena-hud")])
+          : null;
+      if (disposed || token !== generation) return;
+      const seed = opts.seed ?? (Math.random() * 0xffffffff) >>> 0;
+      sim = arena
+        ? new arena[0].ArenaSim(map, c.side, c.difficulty, c.playerName, seed, opts.botsOnly, {
+            kind: c.mode as "deathmatch" | "royale",
+            solo: !!c.solo,
+          })
+        : new simulation.Sim(
+            map,
+            c.side,
+            c.difficulty,
+            c.playerName,
+            seed,
+            opts.botsOnly,
+            c.mode === "casual" ? "casual" : "competitive",
+          );
       if (network) {
         sim.remotePlayer = peerPlayer;
         sim.viewer = host ? 0 : peerPlayer;
         sim.players[0].name = network.launch.hostName;
         sim.players[peerPlayer].name = network.launch.peerName;
       }
+      audio.self = sim.viewer;
       renderer = new engine.GameRenderer(canvas!, map, touch ? "low" : "high");
-      hud = new overlay.MatchHud(
+      ambience = startAmbience(map.id);
+      hud = new (arena ? arena[1].ArenaHud : overlay.MatchHud)(
         stage!,
         sim,
         {
@@ -934,8 +956,23 @@ export async function createGame(
       aimEye +=
         (eyeTarget - aimEye) * (1 - Math.exp(-Math.max(0.001, elapsed) * 18));
     const useMouse = watched === me && !opts.botsOnly;
+    // Planting or defusing drops the view to kneeling height (about a metre above the feet).
+    const job =
+      s.worker >= 0 && (s.action === "Plant" || s.action === "Defuse")
+        ? {
+            actor: s.worker,
+            kind: s.action === "Plant" ? ("plant" as const) : ("defuse" as const),
+            age: s.work,
+            progress: Math.min(1, s.work / (s.action === "Plant" ? 3.2 : s.players[s.worker].kit ? 5 : 10)),
+            kit: s.players[s.worker].kit,
+          }
+        : undefined;
+    kneel +=
+      ((job?.actor === watched.id ? 1 : 0) - kneel) * (1 - Math.exp(-Math.max(0.001, elapsed) * 9));
     const cam = {
-      ...(fly ? flyPos : { x, y: aimEye, z }),
+      ...(fly
+        ? flyPos
+        : { x, y: aimEye - Math.max(0, aimEye - (watched.y + 1.0)) * kneel, z }),
       yaw:
         (useMouse ? yaw : watched.yaw) +
         (watched.punchY * 0.45 * Math.PI) / 180,
@@ -984,6 +1021,8 @@ export async function createGame(
           ? Math.min(1, (s.time - watched.lastFire) / (watched.heavy ? 0.5 : 0.32))
           : 1,
       heavy: watched.heavy,
+      task: job,
+      drops: s.drops,
       inspect:
         inspecting && watched === me
           ? Math.min(1, (s.time - inspecting.at) / (weapon === "knife" ? 2.4 : 2.8))
@@ -1005,6 +1044,7 @@ export async function createGame(
     };
     view.render(props);
     audio.updateListener(cam, cam.yaw, cam.pitch);
+    ambience?.update(audio.volume);
     bar.update(watched, frameRate, touch || currentLock(), reduced.matches);
     if (
       touchUi?.revealed &&

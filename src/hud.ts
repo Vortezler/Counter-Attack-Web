@@ -44,6 +44,8 @@ export class MatchHud {
   feed: { text: string; until: number }[] = [];
   hitEnd = 0;
   hurtEnd = 0;
+  /** Recent hits on the local player: where each shooter stood, when the marker fades, how hard. */
+  hurts: { from: number; x: number; z: number; until: number; amount: number }[] = [];
   hintEnd = 0;
   hint = "";
   popEnd = 0;
@@ -72,7 +74,7 @@ export class MatchHud {
     this.root.innerHTML = `
  <div class="csw-intel"><div class="csw-radar-top"><span>TACTICAL RADAR</span><b>N</b></div><canvas width="210" height="210" data-ui="radar"></canvas><div data-ui="location"></div><strong data-ui="cash"></strong></div>
  <div class="csw-strip"><b class="csw-ct" data-ui="ct"></b><div><small data-ui="round"></small><strong data-ui="clock" data-testid="round-timer"></strong></div><b class="csw-t" data-ui="t"></b></div>
- <div class="csw-killfeed" data-ui="feed"></div><div class="csw-hit" data-ui="hit"></div><div class="csw-hurt" data-ui="hurt"></div><div class="csw-cross" data-ui="cross"></div><div class="csw-scope" data-ui="scope" hidden></div>
+ <div class="csw-killfeed" data-ui="feed"></div><div class="csw-hit" data-ui="hit"></div><div class="csw-hurt" data-ui="hurt"></div><div class="csw-dmg" data-ui="dmg" aria-hidden="true"><i></i><i></i><i></i><i></i></div><div class="csw-cross" data-ui="cross"></div><div class="csw-scope" data-ui="scope" hidden></div>
  <div class="csw-center-msg"><small data-ui="phase"></small><strong data-ui="banner"></strong><span data-ui="prompt"></span><progress data-ui="progress" hidden></progress></div>
  <div class="csw-vitals"><div><small>HEALTH</small><strong data-ui="hp"></strong></div><div><small>ARMOR</small><strong data-ui="armor"></strong></div><div class="csw-kills"><small>KILLS</small><strong data-ui="kills" data-testid="kill-counter"></strong><span data-ui="tally" aria-hidden="true"></span></div></div>
  <div class="csw-smoke" data-ui="smoke"></div><div class="csw-killpop" data-ui="killpop" aria-hidden="true"></div>
@@ -349,10 +351,17 @@ export class MatchHud {
       if (e.victim === s.me.id) {
         this.hurtEnd = s.time + 0.3;
         const attacker = e.actor === undefined ? null : s.players[e.actor];
-        if (attacker) {
-          const angle =
-            Math.atan2(attacker.x - s.me.x, s.me.z - attacker.z) - s.me.yaw;
-          this.ids.hurt.style.setProperty("--direction", angle + "rad");
+        if (attacker && attacker.id !== s.me.id) {
+          // One marker per shooter, refreshed by each new hit and pointing at where they fired from.
+          this.hurts = this.hurts.filter((h) => h.from !== attacker.id && h.until > s.time);
+          this.hurts.unshift({
+            from: attacker.id,
+            x: e.pos?.x ?? attacker.x,
+            z: e.pos?.z ?? attacker.z,
+            until: s.time + 1.6,
+            amount: e.amount ?? 20,
+          });
+          this.hurts.length = Math.min(this.hurts.length, 4);
         }
       }
     }
@@ -447,7 +456,19 @@ export class MatchHud {
       el = this.ids;
     this.root.dataset.phase = s.phase;
     el.hit.style.opacity = String(s.time < this.hitEnd ? 1 : 0);
-    el.hurt.style.opacity = String(s.time < this.hurtEnd ? 0.5 : 0);
+    el.hurt.style.opacity = String(s.time < this.hurtEnd ? 0.28 : 0);
+    // Damage markers turn with the view so they keep pointing at the shooter.
+    const arcs = el.dmg.children;
+    for (let i = 0; i < arcs.length; i++) {
+      const h = this.hurts[i],
+        arc = arcs[i] as HTMLElement,
+        left = h && p.alive ? h.until - s.time : 0;
+      arc.style.opacity = left > 0 ? String(Math.min(1, left / 0.7) * 0.85) : "0";
+      if (left > 0) {
+        arc.style.setProperty("--a", (Math.atan2(h.x - p.x, p.z - h.z) - p.yaw).toFixed(3) + "rad");
+        arc.style.setProperty("--w", (0.22 + Math.min(0.3, h.amount / 200)).toFixed(3) + "rad");
+      }
+    }
     const eye = view.eye;
     let haze = 0;
     for (const c of s.smokes) {
@@ -539,6 +560,8 @@ export class MatchHud {
             ? s.action + "ing…"
             : objective
               ? (this.touch ? "Hold here" : "Hold " + keyName("use")) + " to " + objective.toLowerCase()
+              : p.alive && s.swapTarget(p)
+                ? (this.touch ? "Tap use" : keyName("use")) + "  /  Swap for " + weaponName(s.swapTarget(p)!.item as Parameters<typeof weaponName>[0])
               : s.canBuy(p)
                 ? this.touch
                   ? "Tap the radar to buy"

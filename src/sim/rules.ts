@@ -109,9 +109,20 @@ export function nearest(nodes: NavPoint[], x: number, z: number) {
   });
   return best;
 }
-export function path(nodes: NavPoint[], start: number, end: number): number[] {
+/**
+ * A* over the nav graph. A non-zero `seed` makes each link up to 90% "costlier" by a fixed
+ * per-seed amount, so bots with different seeds prefer different, still sensible, routes.
+ */
+export function path(nodes: NavPoint[], start: number, end: number, seed = 0): number[] {
   const distance = (a: number, b: number) =>
     Math.hypot(nodes[a].x - nodes[b].x, nodes[a].z - nodes[b].z);
+  const cost = (a: number, b: number) => {
+    if (!seed) return distance(a, b);
+    let h = Math.imul(Math.min(a, b) + 1, 0x9e3779b1) ^ Math.imul(Math.max(a, b) + 1, 0x85ebca77) ^ seed;
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+    h ^= h >>> 12;
+    return distance(a, b) * (1 + 0.9 * ((h >>> 0) / 4294967296));
+  };
   const open = new Set([start]),
     g = new Map([[start, 0]]),
     parent = new Map<number, number>();
@@ -135,7 +146,7 @@ export function path(nodes: NavPoint[], start: number, end: number): number[] {
     }
     open.delete(cur);
     for (const link of nodes[cur].links) {
-      const v = g.get(cur)! + distance(cur, link);
+      const v = g.get(cur)! + cost(cur, link);
       if (v < (g.get(link) ?? Infinity)) {
         g.set(link, v);
         parent.set(link, cur);

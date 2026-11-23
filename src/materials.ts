@@ -341,6 +341,25 @@ const painters: Record<string, () => Painter> = {
       o.tint = 1 - Math.max(rust, chip);
     };
   },
+  freight() {
+    // Painted sheet steel on rolling stock: faded paint, grime, rust run-off and dark primer chips.
+    const f = fields();
+    return (x, y, o) => {
+      const fade = at(f.low, x, y),
+        grime = smooth(0.45, 0.9, at(f.streak, x + 70, y)) * 0.6,
+        rustField = at(f.low, x + 50, y + 80) * 0.6 + at(f.mid, x, y + 9) * 0.4,
+        streak = smooth(0.66, 0.88, at(f.streak, x + 10, y)) * at(f.low, x + 9, y + 130),
+        rust = Math.max(smooth(0.74, 0.84, rustField), 0.6 * streak) * (0.5 + 0.5 * at(f.mid, x + 33, y + 71)),
+        chip = smooth(0.93, 0.97, at(f.high, x + 40, y + 2)) * (1 - rust);
+      const paint = (0.84 + 0.12 * fade) * (1 - 0.16 * grime);
+      o.r = mix(mix(paint, 0.28, chip), 0.62, rust);
+      o.g = mix(mix(paint, 0.27, chip), 0.36, rust);
+      o.b = mix(mix(paint, 0.26, chip), 0.22, rust);
+      o.h = 0.5 + 0.08 * at(f.mid, x, y) - 0.05 * chip + 0.06 * rust;
+      o.rough = mix(0.62, 0.9, Math.max(rust, chip));
+      o.tint = 1 - Math.max(rust, chip);
+    };
+  },
   tile() {
     // Glazed wall tiles.
     const f = fields();
@@ -527,6 +546,7 @@ const settings: Record<string, { scale: number; normal: number; metal?: number }
   concrete: { scale: 4, normal: 1.2 },
   wood: { scale: 1.6, normal: 1.2 },
   metal: { scale: 3.6, normal: 1.5, metal: 0.45 },
+  freight: { scale: 3.2, normal: 0.8, metal: 0.25 },
   tile: { scale: 1.6, normal: 0.9 },
   glass: { scale: 2, normal: 0.3, metal: 0.2 },
   cardboard: { scale: 1.2, normal: 0.8 },

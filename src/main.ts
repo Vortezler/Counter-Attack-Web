@@ -3,7 +3,7 @@ import { hubUrl } from "./hub/navigation";
 import { createGame } from "./index";
 import { consumeRoomRequest } from "./hub/navigation";
 import { restorePlayerName } from "./hub/supabase";
-import { lobbyMaps, type LobbyMap } from "./menu";
+import { lobbyMaps, lobbyModes, type LobbyMap, type LobbyMode } from "./menu";
 import { markPlatform, nativeApp } from "./platform";
 markPlatform();
 async function openPeerMatch(launch: Promise<PeerMatch>) {
@@ -70,7 +70,10 @@ async function openSolo() {
       ? (q.get("map") as LobbyMap)
       : "dust2",
     side: q.get("side") === "T" ? "T" : "CT",
-    mode: q.get("mode") === "casual" ? "casual" : "competitive",
+    mode: (lobbyModes as string[]).includes(q.get("mode") ?? "")
+      ? (q.get("mode") as LobbyMode)
+      : "competitive",
+    solo: q.get("solo") === "1",
     difficulty:
       q.get("difficulty") === "easy"
         ? "easy"

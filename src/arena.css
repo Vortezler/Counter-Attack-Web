@@ -1,0 +1,55 @@
+/* Deathmatch and battle royale additions to the match HUD. */
+.csw-hud[data-arena] .csw-strip > b {
+  position: relative;
+  width: auto;
+  min-width: 1.8em;
+  padding: 0 0.35em;
+}
+.csw-hud[data-arena] .csw-strip > b::after {
+  content: attr(data-label);
+  position: absolute;
+  left: 50%;
+  top: calc(100% + 3px);
+  transform: translateX(-50%);
+  font-size: 0.42em;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  opacity: 0.8;
+  text-shadow: 0 1px 2px #000a;
+}
+.csw-hud[data-solo] .csw-ct {
+  background: #4d5a52;
+}
+.csw-hud[data-solo] .csw-t {
+  background: #7a4c3c;
+}
+.csw-zonewarn {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  box-shadow: inset 0 0 18vmin 4vmin rgb(255 70 45 / 0.5);
+  transition: opacity 0.3s;
+}
+.csw-hud[data-outside] .csw-zonewarn {
+  opacity: 1;
+  animation: csw-zonepulse 1.2s ease-in-out infinite;
+}
+.csw-hud[data-outside] [data-ui="phase"] {
+  color: #ff9a7a;
+}
+@keyframes csw-zonepulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+.csw-hud table.csw-ffa td:first-child {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: reduce) {
+  .csw-hud[data-outside] .csw-zonewarn {
+    animation: none;
+  }
+}

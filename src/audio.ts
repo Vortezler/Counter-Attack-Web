@@ -110,6 +110,9 @@ export class GameAudio {
   private noise: AudioBuffer | null = null;
   private drive: Float32Array<ArrayBuffer> | null = null;
   private level = 0.65;
+  /** The listening player's id: their own shots and hits sound close, not spatial. */
+  self = 0;
+  private lastWhiz = 0;
   private ear: Vec3 = { x: 0, y: 0, z: 0 };
   private sources = new Set<AudioScheduledSourceNode>();
   private obstructions = new Map<number, { time: number; blocked: boolean }>();
@@ -382,7 +385,7 @@ export class GameAudio {
   }
   private gunshot(e: SimEvent) {
     const v = guns[e.weapon ?? "glock"] ?? guns.glock,
-      local = e.actor === 0;
+      local = e.actor === this.self;
     this.voice(
       e,
       v.tail + 0.7,
@@ -678,6 +681,7 @@ export class GameAudio {
   /** Plays a sim event; `floor` is the material under a footstep, when the caller knows it. */
   play(e: SimEvent, floor?: string) {
     if (!this.ctx || !this.master) return;
+    if (e.type === "shot" || e.type === "tracer") this.nearMiss(e);
     if (e.type === "shot") this.gunshot(e);
     else if (e.type === "step") this.step(e, floor ?? e.message ?? "concrete"); else if (e.type === "reload") {
       this.voice(
@@ -762,7 +766,7 @@ export class GameAudio {
         },
         { wet: 0.1, reach: 45 },
       );
-      if (e.actor === 0 && e.victim !== 0) this.marker(e);
+      if (e.actor === this.self && e.victim !== this.self) this.marker(e);
     } else if (e.type === "blind") {
       const length = Math.max(0.3, Math.min(5, e.amount ?? 1));
       this.voice({ type: "blind" }, length, (out, n, t) =>
@@ -785,8 +789,20 @@ export class GameAudio {
           0.22,
         ),
       );
-    } else if (e.type === "hit" && e.actor === 0 && e.victim !== 0)
+    } else if (e.type === "hit" && e.actor === this.self && e.victim !== this.self)
       this.marker(e);
+    else if (e.type === "hit" && e.victim === this.self) this.hurt(e);
+    else if (e.type === "pickup")
+      this.voice(
+        e,
+        0.3,
+        (out, n, t) => {
+          this.click(out, n, t, 0.16, 2100);
+          this.hiss(out, n, t + 0.04, 0.12, 1100, 0.08, "bandpass", 0.8, 0.02);
+          this.click(out, n, t + 0.16, 0.1, 3200);
+        },
+        { wet: 0.06, reach: 25 },
+      );
     else if (e.type === "slash")
       this.voice(
         e,
@@ -846,6 +862,79 @@ export class GameAudio {
         { wet: 0 },
       );
     }
+  }
+  /** A point `d` metres from the ear toward `p`, so a sound reads as coming from that way. */
+  private toward(p: Vec3, d: number) {
+    const dx = p.x - this.ear.x,
+      dy = p.y - this.ear.y,
+      dz = p.z - this.ear.z,
+      len = Math.hypot(dx, dy, dz) || 1;
+    return {
+      x: this.ear.x + (dx / len) * d,
+      y: this.ear.y + (dy / len) * d,
+      z: this.ear.z + (dz / len) * d,
+    };
+  }
+  /**
+   * Taking a hit: a dull body impact (a sharp ring off the head), panned toward the shooter
+   * so you can tell where it came from.
+   */
+  private hurt(e: SimEvent) {
+    const from = e.pos ? { type: "hurt", pos: this.toward(e.pos, 1.4) } : { type: "ui" },
+      hard = Math.min(1, (e.amount ?? 20) / 60);
+    this.voice(
+      from,
+      0.45,
+      (out, n, t) => {
+        if (e.head) {
+          this.hiss(out, n, t, 0.03, 4200, 0.32, "highpass", 0.7, 0.0006);
+          this.tone(out, n, t, 0.22, 2350, 2200, 0.07, "triangle");
+          this.tone(out, n, t, 0.09, 160, 70, 0.3);
+        } else {
+          this.tone(out, n, t, 0.12, 120, 52, 0.22 + 0.2 * hard);
+          this.hiss(out, n, t, 0.09, 650, 0.2 + 0.15 * hard, "lowpass", 0.8, 0.002);
+        }
+        // The breath knocked out of you.
+        this.hiss(out, n, t + 0.05, 0.22, 900, 0.05 + 0.05 * hard, "bandpass", 0.9, 0.04);
+      },
+      { wet: 0.02, reach: 10 },
+    );
+  }
+  /**
+   * A round passing close by: the supersonic crack where it came nearest, and a short whiz,
+   * placed at that point so you hear which side it went past and roughly where it came from.
+   */
+  private nearMiss(e: SimEvent) {
+    if (!e.pos || !e.end || e.actor === this.self) return;
+    const a = e.pos,
+      b = e.end,
+      dx = b.x - a.x,
+      dy = b.y - a.y,
+      dz = b.z - a.z,
+      len2 = dx * dx + dy * dy + dz * dz;
+    if (len2 < 1) return;
+    const k = Math.max(0, Math.min(1, ((this.ear.x - a.x) * dx + (this.ear.y - a.y) * dy + (this.ear.z - a.z) * dz) / len2)),
+      c = { x: a.x + dx * k, y: a.y + dy * k, z: a.z + dz * k },
+      miss = Math.hypot(c.x - this.ear.x, c.y - this.ear.y, c.z - this.ear.z),
+      flown = Math.sqrt(len2) * k;
+    // Only rounds that pass within a few metres, past the shooter's own muzzle.
+    if (miss > 3 || flown < 4 || k >= 1) return;
+    const close = 1 - miss / 3,
+      now = this.ctx?.currentTime ?? 0;
+    // A shotgun's pellets arrive together: one crack for the volley.
+    if (now - this.lastWhiz < 0.04) return;
+    this.lastWhiz = now;
+    this.voice(
+      { type: "whiz", pos: this.toward(c, Math.max(0.7, miss)) },
+      0.3,
+      (out, n, t) => {
+        this.hiss(out, n, t, 0.012, 6000, 0.12 + 0.3 * close, "highpass", 0.7, 0.0005);
+        const w = this.hiss(out, n, t + 0.004, 0.14, 2800, 0.05 + 0.1 * close, "bandpass", 3, 0.01);
+        w.frequency.setValueAtTime(3400, t + 0.004);
+        w.frequency.exponentialRampToValueAtTime(900, t + 0.14);
+      },
+      { wet: 0.04, reach: 10 },
+    );
   }
   private marker(e: SimEvent) {
     this.voice(

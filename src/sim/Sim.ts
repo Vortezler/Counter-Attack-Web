@@ -96,6 +96,20 @@ export interface Fire {
   team: Team;
   next: number;
 }
+/** A weapon, grenade or defuse kit lying on the ground, dropped by a dead player or a swap. */
+export interface Drop {
+  id: number;
+  item: Weapon | "kit";
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  /** When it was dropped, for the fall animation. */
+  born: number;
+  ammo?: number;
+  reserve?: number;
+}
+export const DROP_REACH = 1.1;
 export const SMOKE_TIME = 18,
   FIRE_TIME = 7;
 type Hits = Map<
@@ -134,7 +148,8 @@ export class Sim {
   losses = { CT: 0, T: 0 };
   result = "";
   carrier = -1;
-  bomb: Vec3 | null = null;
+  /** The loose or planted C4; `yaw` is how a planted one was set down. */
+  bomb: (Vec3 & { yaw?: number }) | null = null;
   plantedSite = "";
   work = 0;
   worker = -1;
@@ -142,7 +157,9 @@ export class Sim {
   grenades: Grenade[] = [];
   smokes: Smoke[] = [];
   fires: Fire[] = [];
+  drops: Drop[] = [];
   nextGrenade = 0;
+  nextDrop = 0;
   lastBeep = 0;
   traceInfo = "";
   listeners = new Set<(e: SimEvent) => void>();
@@ -206,6 +223,7 @@ export class Sim {
     this.grenades = [];
     this.smokes = [];
     this.fires = [];
+    this.drops = [];
     this.bomb = null;
     this.plantedSite = "";
     this.worker = -1;
@@ -498,7 +516,10 @@ export class Sim {
       p.pitch = clamp(cmd.pitch, -1.553, 1.553);
       if (cmd.buy && Object.hasOwn(shop, cmd.buy)) this.buy(p, cmd.buy as Item);
       if (cmd.slot) this.switch(p, cmd.slot);
-      if (active) this.move(p, cmd);
+      // Planting and defusing hold the player still on one knee.
+      const working = this.worker === p.id && cmd.use;
+      if (active)
+        this.move(p, working ? { ...cmd, moveX: 0, moveZ: 0, jump: false } : cmd);
       if (p.reloadEnd && this.time >= p.reloadEnd) {
         const m = p.mag;
         if (m) {
@@ -544,7 +565,7 @@ export class Sim {
         this.work += DT;
         if (this.work >= (action === "Plant" ? 3.2 : p.kit ? 5 : 10)) {
           if (action === "Plant") {
-            this.bomb = { x: p.x, y: p.y + 0.1, z: p.z };
+            this.bomb = { ...this.plantSpot(p), yaw: p.yaw };
             this.carrier = -1;
             this.phase = "planted";
             this.plantedSite = this.siteAt(p);
@@ -568,6 +589,7 @@ export class Sim {
           this.action = "";
         }
       }
+      if (p.alive && this.drops.length) this.pickup(p, cmd);
       if (active && !action) this.operateWeapon(p, cmd);
       this.recover(p);
       p.lastCmd = cmd;
@@ -669,6 +691,23 @@ export class Sim {
           this.emit({ type: "step", actor: p.id, pos: p.eye });
           this.hear(p, 17);
         }
+      }
+    }
+  }
+  /** Enemies the round passed within 3 m of know they are being shot at, and by whom. */
+  alarm(p: Player, a: Vec3, b: Vec3) {
+    const dx = b.x - a.x,
+      dy = b.y - a.y,
+      dz = b.z - a.z,
+      len2 = dx * dx + dy * dy + dz * dz || 1;
+    for (const q of this.players) {
+      if (!q.alive || q.team === p.team) continue;
+      const e = q.eye,
+        t = clamp(((e.x - a.x) * dx + (e.y - a.y) * dy + (e.z - a.z) * dz) / len2, 0, 1);
+      if (Math.hypot(a.x + dx * t - e.x, a.y + dy * t - e.y, a.z + dz * t - e.z) < 3) {
+        q.threat = p.id;
+        q.threatAt = this.time;
+        q.heard = { x: p.x, y: p.y, z: p.z };
       }
     }
   }
@@ -858,6 +897,7 @@ export class Sim {
       this.hurt(v, Math.round(h.hp), p, g, h.wall, h.head ? "head" : "chest");
     }
     this.hear(p, g === "m4" ? 20 : 45);
+    this.alarm(p, p.eye, end);
     this.emit({ type: "shot", actor: p.id, pos: p.eye, end, weapon: g });
   }
   /** Traces one projectile, accumulating damage per victim so shotgun pellets land as one hit. */
@@ -992,10 +1032,16 @@ export class Sim {
   ) {
     if (!v.alive || amount <= 0) return;
     v.hp = Math.max(0, v.hp - amount);
+    if (p && p.team !== v.team) {
+      v.threat = p.id;
+      v.threatAt = this.time;
+    }
     this.emit({
       type: "hit",
       actor: p?.id,
       victim: v.id,
+      // Where the damage came from, so the victim hears and sees its direction.
+      pos: p && p.id !== v.id ? p.eye : undefined,
       weapon,
       amount,
       wallbang,
@@ -1009,6 +1055,7 @@ export class Sim {
       this.carrier = -1;
       this.bomb = { x: v.x, y: v.y + 0.15, z: v.z };
     }
+    if (this.map.id !== "range") this.scatter(v);
     const teamkill = !!p && p.team === v.team && p.id !== v.id;
     if (teamkill && p) {
       p.kills = Math.max(0, p.kills - 1);
@@ -1034,6 +1081,111 @@ export class Sim {
       message: teamkill ? "teamkill" : undefined,
       dir: { x: dx / len, z: dz / len },
     });
+  }
+  /**
+   * Where a kneeling planter sets the C4: on the floor half a metre ahead and a little to the
+   * right of their feet (the renderer's PLANT_SPOT), pulled back if a wall is closer.
+   */
+  plantSpot(p: Player) {
+    const fx = Math.sin(p.yaw),
+      fz = -Math.cos(p.yaw),
+      wall = this.physics.surface({ x: p.x, y: p.y + 0.25, z: p.z }, { x: fx, y: 0, z: fz }, 0.7),
+      ahead = wall ? Math.max(0, Math.min(0.52, wall.timeOfImpact - 0.18)) : 0.52,
+      x = p.x + fx * ahead + Math.cos(p.yaw) * 0.06,
+      z = p.z + fz * ahead + Math.sin(p.yaw) * 0.06;
+    return { x, y: this.ground(x, p.y, z) + 0.1, z };
+  }
+  /** The floor height under (x, z), searching down from just above `y`. */
+  private ground(x: number, y: number, z: number) {
+    const hit = this.physics.surface({ x, y: y + 1, z }, { x: 0, y: -1, z: 0 }, 6);
+    return hit ? y + 1 - hit.timeOfImpact : y;
+  }
+  private drop(item: Drop["item"], at: Vec3, angle: number, r: number, mag?: { ammo: number; reserve: number }) {
+    const x = at.x + Math.sin(angle) * r,
+      z = at.z - Math.cos(angle) * r;
+    this.drops.push({
+      id: this.nextDrop++,
+      item,
+      x,
+      y: this.ground(x, at.y, z),
+      z,
+      yaw: angle * 1.7,
+      born: this.time,
+      ...(mag && { ammo: mag.ammo, reserve: mag.reserve }),
+    });
+    if (this.drops.length > 48) this.drops.splice(0, this.drops.length - 48);
+  }
+  /** A dead player's guns, grenades and kit spill around the body for anyone to pick up. */
+  scatter(v: Player) {
+    const items: [Drop["item"], { ammo: number; reserve: number }?][] = [];
+    if (v.primary) items.push([v.primary.id, v.primary]);
+    items.push([v.pistol.id, v.pistol]);
+    for (const k of nades) for (let i = 0; i < v[k]; i++) items.push([k]);
+    if (v.kit) items.push(["kit"]);
+    // A golden-angle spiral keeps the items apart without any randomness.
+    items.forEach(([item, mag], i) =>
+      this.drop(item, v, v.yaw + i * 2.39996, 0.32 + 0.14 * (i % 3), mag),
+    );
+    v.primary = null;
+    v.he = v.flash = v.smoke = v.molly = 0;
+    v.kit = false;
+  }
+  /** Takes `d` if there is room for it without swapping anything out. */
+  private take(p: Player, d: Drop) {
+    if (d.item === "kit") {
+      if (p.team !== "CT" || p.kit) return false;
+      p.kit = true;
+      return true;
+    }
+    if (isNade(d.item)) {
+      if (p[d.item] >= nadeLimit[d.item] || nades.reduce((n, k) => n + p[k], 0) >= 4) return false;
+      p[d.item]++;
+      return true;
+    }
+    if (!isGun(d.item) || catalog[d.item].slot !== 1 || p.primary) return false;
+    p.primary = { id: d.item, ammo: d.ammo ?? 0, reserve: d.reserve ?? 0 };
+    return true;
+  }
+  /** The gun on the ground a press of use would swap for, if any. */
+  swapTarget(p: Player) {
+    let best: Drop | null = null,
+      reach = DROP_REACH;
+    for (const d of this.drops) {
+      if (!isGun(d.item) || Math.abs(d.y - p.y) > 1.2) continue;
+      const r = distance(p, d);
+      if (r < reach) {
+        reach = r;
+        best = d;
+      }
+    }
+    return best;
+  }
+  /** Walking over loot picks up whatever fits; pressing use swaps the held slot's gun. */
+  pickup(p: Player, cmd: PlayerCommand) {
+    for (let i = this.drops.length - 1; i >= 0; i--) {
+      const d = this.drops[i];
+      if (Math.abs(d.y - p.y) > 1.2 || distance(p, d) > DROP_REACH || !this.take(p, d)) continue;
+      this.drops.splice(i, 1);
+      this.emit({ type: "pickup", actor: p.id, pos: { x: d.x, y: d.y, z: d.z }, message: d.item });
+    }
+    if (!cmd.use || p.lastCmd.use || this.objective(p)) return;
+    const d = this.swapTarget(p);
+    if (!d || !isGun(d.item)) return;
+    const primary = catalog[d.item].slot === 1,
+      old = primary ? p.primary : p.pistol,
+      mag = { id: d.item, ammo: d.ammo ?? 0, reserve: d.reserve ?? 0 };
+    this.drops.splice(this.drops.indexOf(d), 1);
+    if (old) this.drop(old.id, p, p.yaw, 0.45, old);
+    const holding = !!old && p.weapon === old.id;
+    if (primary) p.primary = mag;
+    else p.pistol = mag;
+    if (holding) {
+      p.reloadEnd = p.scoped = 0;
+      // Swapping like for like still draws the new gun.
+      if (old!.id === mag.id) p.drawEnd = this.time + (primary ? 0.5 : 0.4);
+      else this.equip(p, mag.id);
+    }
+    this.emit({ type: "pickup", actor: p.id, pos: { x: d.x, y: d.y, z: d.z }, message: d.item });
   }
   throwGrenade(p: Player, type: Nade, speed: number) {
     if (!p[type]) return;

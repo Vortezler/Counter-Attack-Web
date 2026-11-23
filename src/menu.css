@@ -1046,3 +1046,8 @@
 .csw-modegrid {
   grid-template-columns: 1fr 1fr;
 }
+
+/* Format labels read as written ("5 vs 5", "free for all"). */
+[data-format] .csw-diffgrid button {
+  text-transform: none;
+}

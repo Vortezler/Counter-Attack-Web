@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 const origin = process.env.CS_WEB_URL || "http://127.0.0.1:5177/cs-web/";
 const effectsOnly = process.argv[2] === "effects";
+/** Map ids on the command line limit the art pass to those maps and skip the effects sheet. */
+const only = process.argv.slice(2).filter((a) => a !== "effects");
 const browser = await chromium.launch({
   channel:
     process.env.CS_WEB_BROWSER_CHANNEL ||
@@ -77,9 +79,22 @@ const views = {
     { x: 92, y: 10, z: 90 },
     { x: 70, y: 1, z: 32 },
   ],
+  switchyard: [
+    { x: 36, y: 12, z: 78 },
+    { x: 60, y: 1, z: 58 },
+  ],
+  canopy: [
+    { x: 71, y: 11, z: 49 },
+    { x: 80, y: 0.5, z: 24 },
+  ],
+  foundry: [
+    { x: 34, y: 4.2, z: 43 },
+    { x: 17, y: 1.2, z: 27 },
+  ],
 };
 if (!effectsOnly)
   for (const [map, [eye, look]] of Object.entries(views)) {
+    if (only.length && !only.includes(map)) continue;
     await frame(map, eye, look);
     await page
       .locator("#shot")
@@ -102,6 +117,10 @@ if (!effectsOnly)
     });
     console.log("art", map);
   }
+if (only.length) {
+  await browser.close();
+  process.exit(0);
+}
 // Effects proof: a T-spawn courtyard on Dust2 with a smoke, a molotov and three bodies.
 const spawn = { x: 52.5, z: 92.5 };
 const actor = (id, x, z, team, alive, yaw = 0) => ({

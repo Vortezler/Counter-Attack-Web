@@ -11,14 +11,38 @@ export const lobbyMaps: LobbyMap[] = [
   "nuke",
   "inferno",
   "vertigo",
+  "switchyard",
+  "canopy",
+  "foundry",
 ];
 export type LobbySide = "CT" | "T";
 export type LobbyDifficulty = "easy" | "normal" | "hard";
-export type LobbyMode = "competitive" | "casual";
-const modeInfo: Record<LobbyMode, [string, string]> = {
-  competitive: ["Competitive", "5 vs 5 <b>·</b> First to 13 <b>·</b> Friendly fire"],
-  casual: ["Casual", "5 vs 5 <b>·</b> Free armor <b>·</b> CT kits <b>·</b> No friendly fire"],
+export type LobbyMode = "competitive" | "casual" | "deathmatch" | "royale";
+export const lobbyModes: LobbyMode[] = ["competitive", "casual", "deathmatch", "royale"];
+const modeLabel: Record<LobbyMode, string> = {
+  competitive: "Competitive",
+  casual: "Casual",
+  deathmatch: "Deathmatch",
+  royale: "Battle royale",
 };
+/** Deathmatch and battle royale can be played as teams or every player for themselves. */
+const arenaMode = (m: LobbyMode) => m === "deathmatch" || m === "royale";
+const modeInfo = (m: LobbyMode, solo: boolean): [string, string] =>
+  m === "competitive"
+    ? ["Competitive", "5 vs 5 <b>·</b> First to 13 <b>·</b> Friendly fire"]
+    : m === "casual"
+      ? ["Casual", "5 vs 5 <b>·</b> Free armor <b>·</b> CT kits <b>·</b> No friendly fire"]
+      : m === "deathmatch"
+        ? [
+            solo ? "Deathmatch · Solo" : "Deathmatch · Teams",
+            (solo ? "Free for all <b>·</b> First to 20 kills" : "5 vs 5 <b>·</b> First team to 50 kills") +
+              " <b>·</b> Instant respawns <b>·</b> Buy anywhere",
+          ]
+        : [
+            solo ? "Battle royale · Solo" : "Battle royale · Teams",
+            (solo ? "Free for all <b>·</b> Last one standing" : "Two squads of 5 <b>·</b> Last squad standing") +
+              " <b>·</b> One life <b>·</b> Loot <b>·</b> Shrinking zone",
+          ];
 export interface MenuSettings {
   sensitivity: number;
   volume: number;
@@ -33,6 +57,8 @@ export interface MenuChoice {
   side: LobbySide;
   difficulty: LobbyDifficulty;
   mode: LobbyMode;
+  /** Deathmatch and battle royale only: free-for-all instead of 5 vs 5. */
+  solo?: boolean;
   playerName: string;
   settings: MenuSettings;
 }
@@ -120,6 +146,24 @@ const mapInfo = {
     region: "Skyline",
     copy: "Fifty floors up: a ramp over scaffolding to A and a stairwell into B.",
   },
+  switchyard: {
+    name: "Switchyard",
+    display: "SWITCHYARD",
+    region: "Rail yard",
+    copy: "Two tracks of parked wagons, level crossings, a loco shed at B and a loading dock at A.",
+  },
+  canopy: {
+    name: "Canopy",
+    display: "CANOPY",
+    region: "Jungle ruins",
+    copy: "Overgrown temple ruins: a flooded cave to B, stone stairs up to the A sanctum.",
+  },
+  foundry: {
+    name: "Foundry",
+    display: "FOUNDRY",
+    region: "Steel works",
+    copy: "Container stacks at B, a racked warehouse at A, and a vent run straight into it.",
+  },
 };
 const localRead = (key: string) => {
   try {
@@ -186,6 +230,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     side: options.side || "CT",
     difficulty: options.difficulty || "normal",
     mode: options.mode || "competitive",
+    solo: options.solo ?? false,
     playerName: options.playerName || localRead("player-name") || "Operator",
     settings: mergeSettings(options.settings),
   };
@@ -206,7 +251,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
         <img class="csw-featureimg" src="${art(choice.map)}" alt="" decoding="sync" fetchpriority="high">
         <div class="csw-featureshade"></div><div class="csw-frame csw-frame-tl"></div><div class="csw-frame csw-frame-tr"></div><div class="csw-frame csw-frame-br"></div>
         <span class="csw-previewtag">${icon("cross")} Map preview</span>
-        <div class="csw-featuretext"><div class="csw-tag">${icon("target")} Bomb defusal</div>
+        <div class="csw-featuretext"><div class="csw-tag">${icon("target")} <span data-modetag>Bomb defusal</span></div>
           <h2></h2><p></p></div>
       </article>
       <div class="csw-poollabel"><span>${icon("map")} Map selection</span><span class="csw-poolcount"></span></div>
@@ -216,7 +261,8 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     <form class="csw-setup"><div class="csw-setuphead">${icon("sliders")}<h2>Match setup</h2></div>
       <div class="csw-setupbody">
         <div class="csw-modeline"><span class="csw-modeicon">${icon("cross")}</span><div><strong data-modename></strong><small data-modecopy></small></div></div>
-        <fieldset><legend>Game mode</legend><div class="csw-diffgrid csw-modegrid">${(["competitive", "casual"] as const).map((m) => `<button type="button" data-mode="${m}">${m}</button>`).join("")}</div></fieldset>
+        <fieldset><legend>Game mode</legend><div class="csw-diffgrid csw-modegrid">${lobbyModes.map((m) => `<button type="button" data-mode="${m}">${modeLabel[m]}</button>`).join("")}</div></fieldset>
+        <fieldset data-format><legend>Format</legend><div class="csw-diffgrid csw-modegrid"><button type="button" data-solo="0">Teams · 5 vs 5</button><button type="button" data-solo="1">Solo · free for all</button></div></fieldset>
         <fieldset><legend>Starting side</legend><div class="csw-teamgrid">
         <button type="button" data-side="CT" aria-label="Counter-Terrorists">${insignia(true)}<span>Counter-Terrorists</span></button>
         <button type="button" data-side="T" aria-label="Terrorists">${insignia(false)}<span>Terrorists</span></button></div></fieldset>
@@ -268,8 +314,13 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       b.setAttribute("aria-pressed", String(b.dataset.side === choice.side));
     for (const b of all<HTMLButtonElement>("[data-mode]"))
       b.setAttribute("aria-pressed", String(b.dataset.mode === choice.mode));
-    get("[data-modename]").textContent = modeInfo[choice.mode][0];
-    get("[data-modecopy]").innerHTML = modeInfo[choice.mode][1];
+    const [modeName, modeCopy] = modeInfo(choice.mode, !!choice.solo);
+    get("[data-modename]").textContent = modeName;
+    get("[data-modecopy]").innerHTML = modeCopy;
+    get("[data-modetag]").textContent = arenaMode(choice.mode) ? modeLabel[choice.mode] : "Bomb defusal";
+    get<HTMLFieldSetElement>("[data-format]").hidden = !arenaMode(choice.mode);
+    for (const b of all<HTMLButtonElement>("[data-solo]"))
+      b.setAttribute("aria-pressed", String((b.dataset.solo === "1") === !!choice.solo));
     for (const b of all<HTMLButtonElement>("[data-difficulty]"))
       b.setAttribute(
         "aria-pressed",
@@ -384,9 +435,13 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     (e) => {
       const b = (e.target as Element).closest<HTMLButtonElement>("button");
       if (!b) return;
-      const { map, side, difficulty, nav, mode } = b.dataset;
-      if (mode === "competitive" || mode === "casual") {
-        choice.mode = mode;
+      const { map, side, difficulty, nav, mode, solo } = b.dataset;
+      if ((lobbyModes as string[]).includes(mode ?? "")) {
+        choice.mode = mode as LobbyMode;
+        reflect();
+      }
+      if (solo === "0" || solo === "1") {
+        choice.solo = solo === "1";
         reflect();
       }
       if (map && (lobbyMaps as string[]).includes(map)) {

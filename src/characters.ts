@@ -557,9 +557,52 @@ export interface PoseInput {
   kickYaw: number;
   /** A recent hit: seconds since it landed, the hitbox group and the bullet's travel in body space (+z is backwards). */
   flinch?: { age: number; group: string; x: number; z: number };
+  /**
+   * Kneeling at the bomb: seconds into the plant or defuse, and where the bomb sits on the
+   * floor in body space (-z is forward, y is height above the feet).
+   */
+  task?: { kind: "plant" | "defuse"; age: number; kit: boolean; at: THREE.Vector3 };
 }
+/** Where a planter sets the C4 down, in body space. */
+export const PLANT_SPOT = new THREE.Vector3(0.06, 0, -0.52);
 const upAxis = new THREE.Vector3(),
-  tilt = new THREE.Quaternion();
+  tilt = new THREE.Quaternion(),
+  toTorso = new THREE.Matrix4(),
+  goal = new THREE.Vector3();
+const mix = (a: number, b: number, k: number) => a + (b - a) * k;
+/**
+ * Drops to one knee over the bomb: left foot planted forward, right knee on the floor, torso
+ * folded over so both hands reach it. Returns the hand goals in torso space.
+ */
+function kneel(m: Humanoid, task: NonNullable<PoseInput["task"]>, t: number) {
+  const k0 = Math.min(1, task.age / 0.35),
+    k = k0 * k0 * (3 - 2 * k0),
+    [left, right] = m.legs;
+  left.hip.rotation.x = mix(left.hip.rotation.x, 1.55, k);
+  left.knee.rotation.x = mix(left.knee.rotation.x, -1.85, k);
+  left.ankle.rotation.x = mix(left.ankle.rotation.x, 0.3, k);
+  right.hip.rotation.x = mix(right.hip.rotation.x, 0.3, k);
+  right.knee.rotation.x = mix(right.knee.rotation.x, -1.9, k);
+  right.ankle.rotation.x = mix(right.ankle.rotation.x, 0.95, k);
+  right.hip.rotation.z = 0.12 * k;
+  m.body.position.y = mix(m.body.position.y, -0.47, k);
+  m.torso.rotation.set(mix(m.torso.rotation.x, -1.05, k), 0, 0);
+  m.head.rotation.set(mix(m.head.rotation.x, 0.5, k), 0, 0);
+  m.held.visible = k < 0.5;
+  // Hands work at the bomb: the planter taps the keypad, the defuser works the wires.
+  m.torso.updateMatrix();
+  toTorso.copy(m.torso.matrix).invert();
+  const lift = -m.body.position.y,
+    tap = task.kind === "plant" ? Math.max(0, Math.sin(t * 19)) * 0.03 : Math.sin(t * 7) * 0.015,
+    hands = [
+      goal.set(task.at.x - 0.1, task.at.y + 0.1 + lift, task.at.z + 0.04).applyMatrix4(toTorso).clone(),
+      goal
+        .set(task.at.x + 0.05 + Math.sin(t * 3) * 0.02, task.at.y + 0.13 + tap + lift, task.at.z - 0.02)
+        .applyMatrix4(toTorso)
+        .clone(),
+    ];
+  return { hands, k };
+}
 export function pose(
   m: Humanoid,
   rag: Ragdoll | undefined,
@@ -611,10 +654,12 @@ export function pose(
       }
       if (fl.group === "arm") m.torso.rotation.y += 0.28 * f * (fl.x < 0 ? -1 : 1);
     }
+    const work = a.task ? kneel(m, a.task, t) : null;
     for (const arm of m.arms) {
       const grip = arm.side > 0 ? m.grip.right : m.grip.left;
       if (grip) target.copy(grip).applyEuler(m.held.rotation).add(m.held.position);
       else target.set(arm.side * 0.24, ty(1.0), -0.03);
+      if (work) target.lerp(work.hands[arm.side > 0 ? 1 : 0], work.k);
       pole.set(
         arm.shoulder.position.x + arm.side * 0.35,
         arm.shoulder.position.y - 0.6,

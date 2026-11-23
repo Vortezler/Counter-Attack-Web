@@ -385,26 +385,29 @@ body {
 .csw-error button {
   margin-right: 1em;
 }
-.csw-hurt::after {
-  content: "";
+/* Directional damage markers: thin arcs around the crosshair, one per shooter, fading out. */
+.csw-dmg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.csw-dmg i {
   position: absolute;
   left: 50%;
   top: 50%;
-  width: 140px;
-  height: 140px;
+  width: 230px;
+  height: 230px;
   border-radius: 50%;
+  opacity: 0;
   background: conic-gradient(
-    from -0.45rad,
-    #ff6847 0 0.9rad,
-    transparent 0.9rad
+    from calc(var(--w, 0.3rad) / -2),
+    rgb(255 92 64 / 0.95) 0 var(--w, 0.3rad),
+    transparent var(--w, 0.3rad)
   );
-  mask: radial-gradient(
-    circle,
-    transparent 61%,
-    black 64% 69%,
-    transparent 71%
-  );
-  transform: translate(-50%, -50%) rotate(var(--direction, 0rad));
+  mask: radial-gradient(circle, transparent 66%, black 68% 71%, transparent 73%);
+  filter: drop-shadow(0 0 3px rgb(255 60 40 / 0.6));
+  transform: translate(-50%, -50%) rotate(var(--a, 0rad));
+  transition: opacity 0.12s linear;
 }
 .csw-loading {
   position: absolute;

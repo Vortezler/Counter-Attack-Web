@@ -4,6 +4,8 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import type { Box, MapDef, Team, Vec3 } from "./world";
 import { BloodFx } from "./blood";
 import { surface } from "./materials";
+import { gunModel } from "./gunModels";
+import { drawsBox, mapScenery } from "./scenery";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import {
   hold,
@@ -11,6 +13,7 @@ import {
   muzzleOf,
   palettes,
   pose,
+  PLANT_SPOT,
   type Humanoid,
   type Ragdoll,
 } from "./characters";
@@ -42,6 +45,10 @@ export interface RenderFrame {
   heavy?: boolean;
   /** Weapon inspect progress from 0 to 1, when the viewed player is inspecting. */
   inspect?: number;
+  /** Someone kneeling at the bomb: seconds in, 0..1 done, and whether a defuser has a kit. */
+  task?: { actor: number; kind: "plant" | "defuse"; age: number; progress: number; kit: boolean };
+  /** Weapons, grenades and kits lying on the ground. */
+  drops?: (Vec3 & { id: number; item: string; yaw: number; born: number })[];
   reload?: number;
   move?: number;
   time?: number;
@@ -49,7 +56,7 @@ export interface RenderFrame {
   fov?: number;
   shadows?: boolean;
   debug?: boolean;
-  bomb?: Vec3 | null;
+  bomb?: (Vec3 & { yaw?: number }) | null;
   grenades?: (Vec3 & { type?: string; id?: number })[];
   smokes?: (Vec3 & { id: number; r: number; born: number; until: number })[];
   fires?: (Vec3 & { id: number; r: number; born: number; until: number })[];
@@ -59,6 +66,8 @@ export interface RenderFrame {
   alpha?: number;
 }
 
+/** How much farther out the textured long guns sit in first person, in metres. */
+const GUN_REACH = 0.1;
 const DEG = Math.PI / 180,
   UP = new THREE.Vector3(0, 1, 0);
 /** How hard each weapon shoves back into the shoulder per shot (1 = rifle). */
@@ -405,6 +414,21 @@ function special(id: string, g: THREE.Group) {
   return false;
 }
 function gun(id: string) {
+  const textured = gunModel(id);
+  if (textured) {
+    if (id === "m4") {
+      // The M4A1-S: the same carbine with its suppressor threaded on.
+      const at = muzzleOf(textured),
+        can = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.019, 0.019, 0.17, 18),
+          new THREE.MeshStandardMaterial({ color: "#2a2d2e", roughness: 0.55, metalness: 0.6 }),
+        );
+      can.rotation.x = Math.PI / 2;
+      can.position.set(at.x, at.y, at.z - 0.075);
+      textured.add(can);
+    }
+    return textured;
+  }
   const g = new THREE.Group();
   if (special(id, g)) return g;
   if (id === "he" || id === "flash") {
@@ -609,14 +633,24 @@ function gun(id: string) {
   }
   return g;
 }
-function heldWeapon(id: string, team: Team) {
-  const rig = new THREE.Group(),
-    model = gun(id),
-    ct = team === "CT",
+/**
+ * A gloved hand closed around a grip at (x, y, z), with its forearm running back toward the
+ * camera. Given a `fist` group, the hand is built around that group's origin so it can be
+ * posed separately; `point` straightens the index finger for pressing keys.
+ */
+function addHand(
+  rig: THREE.Object3D,
+  team: Team,
+  x: number,
+  y: number,
+  z: number,
+  left: boolean,
+  fist?: THREE.Group,
+  point = false,
+) {
+  const ct = team === "CT",
     c = ct ? palettes.CT : palettes.T;
-  rig.userData.muzzle = muzzleOf(model);
-  rig.add(model);
-  const hand = (x: number, y: number, z: number, left: boolean, fist?: THREE.Group) => {
+  {
     const s = left ? -1 : 1,
       host = fist ?? rig,
       arm = new THREE.Group();
@@ -636,6 +670,10 @@ function heldWeapon(id: string, team: Team) {
         z - 0.04 + i * 0.005,
       );
       finger.rotation.z = Math.PI / 2;
+      if (point && i === 0) {
+        finger.rotation.set(Math.PI / 2, 0, 0);
+        finger.position.set(x - s * 0.01, y + 0.03, z - 0.07);
+      }
     }
     const thumb = piece(host, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), c.glove, x - s * 0.03, y + 0.036, z + 0.008);
     thumb.rotation.set(-0.7, 0, s * 0.4);
@@ -651,7 +689,16 @@ function heldWeapon(id: string, team: Team) {
       piece(arm, new THREE.CylinderGeometry(0.076, 0.083, 0.08, 14), palettes.T.dark, 0, -0.15, 0);
       piece(arm, new THREE.CylinderGeometry(0.046, 0.047, 0.04, 14), c.glove, 0, 0.17, 0);
     }
-  };
+  }
+}
+function heldWeapon(id: string, team: Team) {
+  const rig = new THREE.Group(),
+    model = gun(id);
+  rig.userData.muzzle = muzzleOf(model);
+  rig.userData.textured = !!model.userData.textured;
+  rig.add(model);
+  const hand = (x: number, y: number, z: number, left: boolean, fist?: THREE.Group) =>
+    addHand(rig, team, x, y, z, left, fist);
   if (id === "knife") {
     // Hammer grip: the handle runs up through the fist and the wrist cocks the blade forward
     // and inward, edge toward the fingers.
@@ -687,6 +734,172 @@ function heldWeapon(id: string, team: Team) {
     );
   return rig;
 }
+/** A small LED panel drawn from a canvas; `draw` repaints it. */
+function screen(w: number, h: number) {
+  const { canvas, ctx } = makeCanvas(128, Math.round((128 * h) / w)),
+    map = new THREE.CanvasTexture(canvas);
+  map.colorSpace = THREE.SRGBColorSpace;
+  const mesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ map, toneMapped: false }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  let shown = "";
+  const draw = (text: string, bar?: number) => {
+    const key = text + "|" + (bar === undefined ? "" : Math.round(bar * 40));
+    if (key === shown) return;
+    shown = key;
+    ctx.fillStyle = "#0b120c";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#8dff6a";
+    ctx.font = `bold ${Math.round(canvas.height * 0.62)}px monospace`;
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 8, canvas.height * (bar === undefined ? 0.52 : 0.36));
+    if (bar !== undefined) {
+      ctx.strokeStyle = "#8dff6a";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(8, canvas.height * 0.66, canvas.width - 16, canvas.height * 0.22);
+      ctx.fillRect(10, canvas.height * 0.66 + 2, (canvas.width - 20) * bar, canvas.height * 0.22 - 4);
+    }
+    map.needsUpdate = true;
+  };
+  draw("");
+  return { mesh, draw };
+}
+/** A defuse kit: a rugged handheld tester with a screen, a clip connector and a strap pouch. */
+function kitModel() {
+  const g = new THREE.Group(),
+    shell = (w: number, h: number, d: number, r: number, color: string, rough = 0.6) => {
+      const m = new THREE.Mesh(
+        new RoundedBoxGeometry(w, h, d, 2, r),
+        new THREE.MeshStandardMaterial({ color, roughness: rough }),
+      );
+      g.add(m);
+      return m;
+    };
+  shell(0.1, 0.034, 0.15, 0.01, "#2b302c");
+  shell(0.106, 0.02, 0.05, 0.006, "#4b5240", 0.85).position.set(0, -0.004, 0.045);
+  shell(0.072, 0.006, 0.05, 0.002, "#121512").position.set(0, 0.016, -0.03);
+  const led = screen(0.064, 0.042);
+  led.mesh.position.set(0, 0.0195, -0.03);
+  g.add(led.mesh);
+  g.userData.screen = led;
+  for (const x of [-0.022, 0.022]) {
+    const b = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.008, 0.008, 0.006, 12),
+      new THREE.MeshStandardMaterial({ color: x < 0 ? "#b23a2a" : "#c9b23a", roughness: 0.5 }),
+    );
+    b.position.set(x, 0.018, 0.025);
+    g.add(b);
+  }
+  const plug = new THREE.Mesh(
+    new RoundedBoxGeometry(0.04, 0.018, 0.022, 2, 0.004),
+    new THREE.MeshStandardMaterial({ color: "#8d9396", roughness: 0.35, metalness: 0.85 }),
+  );
+  plug.position.set(0, 0.002, -0.084);
+  g.add(plug);
+  return g;
+}
+/** A sagging lead from `a` to `b`, like a wire draped between two clips. */
+function wire(a: THREE.Vector3, b: THREE.Vector3, color: string, sag = 0.08, r = 0.0035) {
+  const mid = a.clone().lerp(b, 0.5);
+  mid.y -= sag;
+  const curve = new THREE.CatmullRomCurve3([a, a.clone().lerp(mid, 0.6), mid, b.clone().lerp(mid, 0.6), b]);
+  return new THREE.Mesh(
+    new THREE.TubeGeometry(curve, 24, r, 6),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.5 }),
+  );
+}
+function clip(color: string) {
+  const g = new THREE.Group(),
+    jaw = new THREE.Mesh(
+      new THREE.BoxGeometry(0.01, 0.008, 0.034),
+      new THREE.MeshStandardMaterial({ color: "#a9afb2", roughness: 0.3, metalness: 0.9 }),
+    ),
+    boot = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.007, 0.009, 0.03, 10),
+      new THREE.MeshStandardMaterial({ color, roughness: 0.55 }),
+    );
+  jaw.position.z = -0.024;
+  boot.rotation.x = Math.PI / 2;
+  g.add(jaw, boot);
+  return g;
+}
+const CODE = "4190273";
+/**
+ * First-person planting: the C4 held low in front, the left hand steadying it while the right
+ * index finger types the arming code on the keypad, digit by digit on the little screen.
+ */
+function plantRig(team: Team) {
+  const rig = new THREE.Group(),
+    c4 = gun("bomb");
+  c4.position.set(0.0, -0.215, -0.5);
+  c4.rotation.set(0.95, -0.12, 0);
+  rig.add(c4);
+  const led = screen(0.094, 0.032);
+  led.mesh.position.set(0, 0.1035, -0.037);
+  c4.add(led.mesh);
+  c4.updateMatrix();
+  const keys: THREE.Vector3[] = [];
+  for (let i = 0; i < 9; i++)
+    keys.push(new THREE.Vector3(-0.031 + (i % 3) * 0.031, 0.104, Math.floor(i / 3) * 0.025).applyMatrix4(c4.matrix));
+  const normal = new THREE.Vector3(0, 1, 0).applyEuler(c4.rotation);
+  addHand(rig, team, -0.175, -0.225, -0.47, true);
+  // The right hand comes in from the side with the index finger pointing down-left at the
+  // keys, so it never hides the screen.
+  const finger = new THREE.Group(),
+    tip = new THREE.Vector3(-0.01, 0.03, -0.1);
+  finger.position.set(0, 0, 0);
+  finger.lookAt(new THREE.Vector3(0.75, 0.55, 0.35));
+  tip.applyQuaternion(finger.quaternion);
+  finger.position.copy(keys[4]).sub(tip);
+  rig.add(finger);
+  addHand(rig, team, finger.position.x, finger.position.y, finger.position.z, false, finger, true);
+  rig.userData = { kind: "plant", c4, led, keys, normal, finger, tip };
+  return rig;
+}
+/**
+ * First-person defusing. With a kit, the left hand holds the tester (its screen counts the
+ * progress) and two leads run from it down to the bomb, the right hand working a clip;
+ * without one, both hands work the wires by hand.
+ */
+function defuseRig(team: Team, kit: boolean) {
+  const rig = new THREE.Group(),
+    data: Record<string, unknown> = { kind: "defuse" };
+  if (kit) {
+    const box = kitModel();
+    box.position.set(-0.12, -0.24, -0.4);
+    box.rotation.set(1.0, 0.35, 0.1);
+    rig.add(box);
+    box.updateMatrix();
+    addHand(rig, team, -0.155, -0.29, -0.37, true);
+    const plug = new THREE.Vector3(0, 0.002, -0.096).applyMatrix4(box.matrix);
+    const hand = new THREE.Group();
+    hand.position.set(0.13, -0.29, -0.46);
+    rig.add(hand);
+    addHand(rig, team, 0.13, -0.29, -0.46, false, hand);
+    const held = clip("#b23a2a");
+    held.position.set(-0.02, 0.05, -0.03);
+    held.rotation.set(-0.6, 0.4, 0);
+    hand.add(held);
+    rig.add(wire(plug, new THREE.Vector3(0.11, -0.25, -0.5), "#b23a2a", 0.05));
+    rig.add(wire(plug.clone().add(new THREE.Vector3(0.008, 0, 0)), new THREE.Vector3(0.03, -0.62, -0.66), "#c9b23a", 0.02));
+    Object.assign(data, { box, hand });
+  } else {
+    const l = new THREE.Group(),
+      r = new THREE.Group();
+    l.position.set(-0.08, -0.31, -0.5);
+    r.position.set(0.1, -0.3, -0.5);
+    rig.add(l, r);
+    addHand(rig, team, -0.08, -0.31, -0.5, true, l);
+    addHand(rig, team, 0.1, -0.3, -0.5, false, r);
+    const strand = wire(new THREE.Vector3(-0.01, 0.05, -0.03), new THREE.Vector3(0.1, -0.2, -0.12), "#b23a2a", 0.03, 0.0025);
+    r.add(strand);
+    Object.assign(data, { l, r });
+  }
+  rig.userData = data;
+  return rig;
+}
 function flatten(group: THREE.Group) {
   const gs: THREE.BufferGeometry[] = [];
   for (const obj of [...group.children]) {
@@ -714,6 +927,8 @@ function flatten(group: THREE.Group) {
     obj.material.dispose();
     group.remove(obj);
   }
+  // Textured gun models keep their own meshes (and textures); there is nothing to merge.
+  if (!gs.length) return;
   const geo = mergeGeometries(gs, false);
   gs.forEach((g) => g.dispose());
   if (geo) {
@@ -809,7 +1024,8 @@ interface Theme {
   floor: string;
   cap: string;
   lip: string;
-  facade: "market" | "industrial" | "construction";
+  /** "ruins" leaves walls bare here; `scenery.ts` dresses them. */
+  facade: "market" | "industrial" | "construction" | "ruins";
   doors: string[];
   tiles: string[];
   trimTile: string;
@@ -818,7 +1034,8 @@ interface Theme {
   sky: [string, string, string, string];
   fog: number;
   fogDensity: number;
-  skyline: "domes" | "towers" | "cooling" | "below";
+  /** "none" leaves the horizon to `scenery.ts`. */
+  skyline: "domes" | "towers" | "cooling" | "below" | "none";
   skylineColor: string;
   accent: string;
   trees: "palm" | "cypress" | "none";
@@ -922,6 +1139,66 @@ const themes: Record<string, Theme> = {
     skyline: "below",
     skylineColor: "#8ea2b2",
     accent: "#e0a030",
+    trees: "none",
+  },
+  switchyard: {
+    seed: 733,
+    walls: ["#8e5a45", "#9a6450", "#7f5546", "#a06d55", "#8b6152", "#93705c"],
+    floor: "#9a948a",
+    cap: "#6f6a62",
+    lip: "#857a6c",
+    facade: "industrial",
+    doors: ["#3f5a4a", "#6b3b2c", "#4a5a66", "#7a6a45"],
+    tiles: ["#5a6a5e", "#a3483a"],
+    trimTile: "#7d776c",
+    signs: ["DEPOT 4", "NO SHUNTING", "GOODS YARD"],
+    awning: ["#5a5f5a", "#4c514c"],
+    sky: ["#4c6d8a", "#9fb6c6", "#e6d5bb", "#7f7466"],
+    fog: 0xc9c0b0,
+    fogDensity: 0.006,
+    skyline: "none",
+    skylineColor: "#8a6a58",
+    accent: "#b0873c",
+    trees: "none",
+  },
+  canopy: {
+    seed: 271,
+    walls: ["#8f9180", "#868a77", "#9a9a86", "#7e8470", "#939583", "#8a8c7b"],
+    floor: "#8d8a7a",
+    cap: "#6f735f",
+    lip: "#7f826e",
+    facade: "ruins",
+    doors: ["#5a4a36", "#4e5a3e"],
+    tiles: ["#7c7f6a"],
+    trimTile: "#82846f",
+    signs: [""],
+    awning: ["#5a6a40", "#4a5a35"],
+    sky: ["#5d7f86", "#a8c3bc", "#dfe6d2", "#6f7a5e"],
+    fog: 0xb7c4b0,
+    fogDensity: 0.0085,
+    skyline: "none",
+    skylineColor: "#5f7752",
+    accent: "#6b7f4a",
+    trees: "none",
+  },
+  foundry: {
+    seed: 859,
+    walls: ["#9ea3a3", "#8e9496", "#a8a59c", "#8b8f88", "#b0aca2", "#979c9d"],
+    floor: "#8c8a84",
+    cap: "#6e7274",
+    lip: "#8f9496",
+    facade: "industrial",
+    doors: ["#c9a227", "#3f5f7f", "#8a3a2c", "#5f6b6e"],
+    tiles: ["#c9a227", "#2f3a40"],
+    trimTile: "#7f8485",
+    signs: ["FURNACE 2", "DANGER", "BAY C"],
+    awning: ["#5d6a70", "#4c585e"],
+    sky: ["#6c7f8c", "#b5bcbc", "#d8cfc0", "#7a756c"],
+    fog: 0xbdb8ae,
+    fogDensity: 0.0068,
+    skyline: "none",
+    skylineColor: "#7b7f80",
+    accent: "#c9a227",
     trees: "none",
   },
 };
@@ -1158,6 +1435,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
     scene.add(mesh);
   }
   function facade(b: Box, dx: number, dz: number) {
+    if (theme.facade === "ruins") return;
     const span = dx ? b.d : b.w,
       angle = Math.atan2(dx, dz),
       cx = b.x + (dx * b.w) / 2,
@@ -1316,6 +1594,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
     }
   }
   for (const b of map.boxes) {
+    if (drawsBox(b)) continue;
     const { x, y, z, w, h, d, mat, style } = b;
     const palette = theme.walls;
     const tint: string =
@@ -1726,6 +2005,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
         }
       }
     backdrop();
+    mapScenery(map, { add, cub, rod, rng, scene });
   } else {
     label("25 M", 36, 3.65, 17.055, 3, 1.5, 0, false, "#393c32", "#dbd2b6");
     for (let i = 0; i < 6; i++)
@@ -1743,6 +2023,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
       );
   }
   function backdrop() {
+    if (theme.skyline === "none") return;
     if (theme.skyline === "below") {
       // A skyline far below the deck: tower tops sink under the horizon and cranes rise past it.
       for (let i = 0; i < 46; i++) {
@@ -1962,8 +2243,10 @@ function releaseTree(root: THREE.Object3D) {
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.geometry) return;
-    geometry.add(m.geometry);
+    // Loaded gun models share geometry and materials between copies; they live for the session.
+    if (!m.geometry.userData.shared) geometry.add(m.geometry);
     for (const mat of Array.isArray(m.material) ? m.material : [m.material]) {
+      if (mat.userData.shared) continue;
       material.add(mat);
       const t = (mat as THREE.MeshStandardMaterial).map;
       if (t && !t.userData.shared) textures.add(t);
@@ -2008,6 +2291,9 @@ export class GameRenderer {
   private arsenal = new Map<string, THREE.Group>();
   private currentGun = "";
   private bomb: THREE.Group;
+  private jobs = new Map<string, THREE.Group>();
+  private loot = new Map<number, THREE.Object3D>();
+  private v3 = new THREE.Vector3();
   private throws: THREE.Mesh[] = [];
   private decals: THREE.Mesh[] = [];
   /** `local` tracers start at the first-person muzzle, re-anchored every frame as the view moves. */
@@ -2409,6 +2695,157 @@ export class GameRenderer {
         this.viewFlash = 0.045;
     }
   }
+  private animateJob(r: THREE.Group, job: NonNullable<RenderFrame["task"]>, t: number) {
+    const d = r.userData,
+      ease = (x: number) => {
+        const k = Math.min(1, Math.max(0, x));
+        return k * k * (3 - 2 * k);
+      },
+      rise = ease(job.age / 0.35);
+    r.position.set(0, -0.28 * (1 - rise) + (d.kind === "defuse" ? 0.065 : 0), 0.04 * (1 - rise));
+    r.rotation.set(0, 0, 0);
+    if (d.kind === "plant") {
+      // Seven key presses, each a move to the key and a short press along the keypad's normal.
+      const keys = d.keys as THREE.Vector3[],
+        normal = d.normal as THREE.Vector3,
+        finger = d.finger as THREE.Group,
+        u = (job.age - 0.35) / 0.32,
+        i = Math.max(0, Math.min(CODE.length - 1, Math.floor(u))),
+        f = Math.min(1, Math.max(0, u - i)),
+        key = (n: number) => keys[(Number(CODE[Math.max(0, n)]) + 8) % 9],
+        from = i === 0 && f < 0.5 ? keys[4] : key(i - 1),
+        press = u >= 0 && u < CODE.length ? Math.sin(Math.min(1, Math.max(0, (f - 0.45) / 0.3)) * Math.PI) : 0,
+        typed = u < 0 ? 0 : Math.min(CODE.length, i + (f > 0.6 ? 1 : 0));
+      this.v3.copy(from).lerp(key(i), ease(f / 0.45));
+      finger.position
+        .copy(this.v3)
+        .sub(d.tip as THREE.Vector3)
+        .addScaledVector(normal, 0.03 - press * 0.03);
+      (d.led as ReturnType<typeof screen>).draw(CODE.slice(0, typed).padEnd(CODE.length, "-"));
+      // Done typing: set it down in front.
+      const place = ease((job.age - 2.65) / 0.5);
+      r.position.y -= 0.2 * place;
+      r.position.z -= 0.12 * place;
+    } else {
+      if (d.box) {
+        const led = (d.box as THREE.Object3D).userData.screen as ReturnType<typeof screen>;
+        led.draw(Math.round(job.progress * 100) + "%", job.progress);
+        const hand = d.hand as THREE.Group;
+        hand.position.set(0.13 + Math.sin(t * 5) * 0.006, -0.29 + Math.abs(Math.sin(t * 9)) * 0.008, -0.46);
+        hand.rotation.z = Math.sin(t * 4) * 0.12;
+      } else {
+        const l = d.l as THREE.Group,
+          rr = d.r as THREE.Group;
+        l.position.set(-0.08, -0.31 + Math.sin(t * 6) * 0.01, -0.5);
+        rr.position.set(0.1 + Math.sin(t * 7.5) * 0.012, -0.3 + Math.abs(Math.sin(t * 5)) * 0.02, -0.5);
+        rr.rotation.z = Math.sin(t * 6) * 0.25;
+      }
+    }
+  }
+  /** The plant or defuse `p` is doing, with the bomb's spot in their body space. */
+  private taskFor(f: RenderFrame, p: RenderActor, model: Humanoid) {
+    const job = f.task;
+    if (!job || job.actor !== p.id || !p.alive) return undefined;
+    const at = new THREE.Vector3().copy(PLANT_SPOT);
+    if (job.kind === "defuse" && f.bomb) {
+      const dx = f.bomb.x - model.root.position.x,
+        dz = f.bomb.z - model.root.position.z,
+        c = Math.cos(p.yaw),
+        s = Math.sin(p.yaw);
+      at.set(dx * c + dz * s, Math.max(0, f.bomb.y - 0.1 - model.root.position.y), -dx * s + dz * c);
+    }
+    return { kind: job.kind, age: job.age, kit: job.kit, at };
+  }
+  /** C4 in front of a planter's knees; a defuser's kit on the floor with its leads to the bomb. */
+  private props(model: Humanoid, job: RenderFrame["task"], at?: THREE.Vector3) {
+    let g = model.root.userData.props as THREE.Group | undefined;
+    if (!job || !at) {
+      if (g) g.visible = false;
+      return;
+    }
+    if (!g) {
+      g = new THREE.Group();
+      const c4 = gun("bomb"),
+        kit = kitModel();
+      c4.name = "c4";
+      kit.name = "kit";
+      g.add(c4, kit);
+      model.body.add(g);
+      model.root.userData.props = g;
+    }
+    g.visible = true;
+    g.position.y = -model.body.position.y;
+    const c4 = g.getObjectByName("c4")!,
+      kit = g.getObjectByName("kit")!;
+    c4.visible = job.kind === "plant" && job.age > 0.3;
+    c4.position.set(PLANT_SPOT.x, 0.06 + Math.max(0, 0.65 - job.age) * 0.5, PLANT_SPOT.z);
+    kit.visible = job.kind === "defuse" && job.kit;
+    // Drawn a little larger than life so the kit and its leads read at a distance.
+    kit.position.set(-0.26, 0.025, -0.36);
+    kit.rotation.y = 0.5;
+    kit.scale.setScalar(1.4);
+    const old = g.getObjectByName("leads");
+    if (!kit.visible) {
+      if (old) old.visible = false;
+      return;
+    }
+    // Leads from the kit's plug to the bomb, rebuilt only when the bomb is somewhere new.
+    const key = at.toArray().map((v) => v.toFixed(2)).join();
+    if (old && old.userData.key === key) {
+      old.visible = true;
+      return;
+    }
+    if (old) {
+      releaseTree(old);
+      g.remove(old);
+    }
+    const leads = new THREE.Group();
+    leads.name = "leads";
+    leads.userData.key = key;
+    kit.updateMatrix();
+    const plug = new THREE.Vector3(0, 0.002, -0.096).applyMatrix4(kit.matrix),
+      end = new THREE.Vector3(at.x, at.y + 0.1, at.z);
+    leads.add(
+      wire(plug, end, "#d23a26", 0.05, 0.008),
+      wire(plug.clone().add(new THREE.Vector3(0.012, 0, 0)), end.clone().add(new THREE.Vector3(0.05, 0, 0)), "#e0c43a", 0.04, 0.008),
+    );
+    g.add(leads);
+  }
+  /** Loot on the ground: each drop falls from waist height, then lies on its side. */
+  private updateLoot(f: RenderFrame, t: number) {
+    const seen = new Set<number>();
+    for (const d of f.drops ?? []) {
+      seen.add(d.id);
+      let obj = this.loot.get(d.id);
+      if (!obj) {
+        const holder = new THREE.Group(),
+          item = d.item === "kit" ? kitModel() : gun(d.item);
+        if (d.item !== "kit") flatten(item);
+        item.traverse((o) => {
+          if ((o as THREE.Mesh).isMesh) o.castShadow = true;
+        });
+        // Guns and grenades lie on their side; the kit lies flat.
+        if (d.item !== "kit") item.rotation.z = Math.PI / 2;
+        holder.add(item);
+        const box = new THREE.Box3().setFromObject(item);
+        item.position.y = -box.min.y;
+        holder.rotation.y = -d.yaw;
+        this.scene.add(holder);
+        this.loot.set(d.id, holder);
+        obj = holder;
+      }
+      const age = (f.time ?? t) - d.born,
+        fall = Math.max(0, 1 - age / 0.42);
+      obj.position.set(d.x, d.y + 0.9 * fall * fall, d.z);
+      obj.rotation.x = fall * 1.4;
+    }
+    for (const [id, obj] of this.loot)
+      if (!seen.has(id)) {
+        this.scene.remove(obj);
+        releaseTree(obj);
+        this.loot.delete(id);
+      }
+  }
   /** A bullet or knife hit: blood spray and a splat behind the victim, plus their flinch. */
   bleed(e: {
     victim?: number;
@@ -2656,6 +3093,7 @@ export class GameRenderer {
             z: -hit.x * sin + hit.z * cos,
           };
       }
+      const task = rag ? undefined : this.taskFor(f, p, model);
       pose(
         model,
         rag,
@@ -2668,12 +3106,18 @@ export class GameRenderer {
           kickPitch: 2 * (p.punchX ?? 0) * DEG,
           kickYaw: 2 * (p.punchY ?? 0) * DEG,
           flinch,
+          task,
         },
         elapsed,
       );
+      this.props(model, rag ? undefined : f.task, task?.at);
     }
     this.bomb.visible = !!f.bomb;
-    if (f.bomb) this.bomb.position.set(f.bomb.x, f.bomb.y + 0.09, f.bomb.z);
+    if (f.bomb) {
+      this.bomb.position.set(f.bomb.x, f.bomb.y - 0.04, f.bomb.z);
+      this.bomb.rotation.y = -(f.bomb.yaw ?? 0);
+    }
+    this.updateLoot(f, t);
     for (let i = 0; i < this.throws.length; i++) {
       const pos = f.grenades?.[i],
         g = this.throws[i];
@@ -2713,11 +3157,23 @@ export class GameRenderer {
       }
       this.currentGun = gunKey;
     }
+    const job = f.task && f.task.actor === f.viewId && !f.spectating ? f.task : undefined,
+      jobKey = job ? job.kind + ":" + viewTeam + ":" + job.kit : "";
+    for (const [key, r] of this.jobs) r.visible = key === jobKey;
+    if (job) {
+      let r = this.jobs.get(jobKey);
+      if (!r) {
+        r = job.kind === "plant" ? plantRig(viewTeam) : defuseRig(viewTeam, job.kit);
+        this.jobs.set(jobKey, r);
+        this.hands.add(r);
+      }
+      this.animateJob(r, job, t);
+    }
     const rig = this.arsenal.get(gunKey),
       reload = Math.max(0, Math.min(1, f.reload ?? 0)),
       dip = Math.sin(reload * Math.PI);
     if (rig) {
-      rig.visible = !zoom && !f.spectating;
+      rig.visible = !zoom && !f.spectating && !job;
       const short = [
         "deagle",
         "glock",
@@ -2731,7 +3187,9 @@ export class GameRenderer {
       rig.position.set(
         0.205 + Math.sin(t * 6.5) * 0.009 * move,
         -0.205 + Math.cos(t * 13) * 0.006 * move - 0.13 * dip,
-        short ? -0.43 : -0.36,
+        // Real rifles reach farther behind the grip than the old blocky ones: push them out so
+        // the stock stays off the lens.
+        (short ? -0.43 : -0.36) - (rig.userData.textured && !short ? GUN_REACH : 0),
       );
       // Recoil moves the weapon, not the bullets: it turns by the same on-screen angle the
       // bullets drift from the crosshair, so the barrel always points where the next round goes.

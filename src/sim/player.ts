@@ -82,6 +82,20 @@ export class Player {
   heavy = false;
   burstLeft = 0;
   heard: Vec3 | null = null;
+  /** The enemy who last shot at this bot (hit or near miss), and when. */
+  threat = -1;
+  threatAt = -10;
+  /** Combat footwork: strafe direction (-1, 0, 1), whether at walking pace, until when. */
+  strafe = 0;
+  strafeWalk = false;
+  strafeUntil = 0;
+  /** Where the current fight started: strafing sways around this spot rather than drifting off. */
+  anchor = { x: 0, z: 0 };
+  /** This bot's own line through the current waypoint, so teammates don't walk single file. */
+  lane: { node: number; x: number; z: number } | null = null;
+  /** Route toward the enemy being pushed, and when to recompute it. */
+  chase: number[] = [];
+  chaseAt = 0;
   staging: { x: number; z: number } | null = null;
   constructor(
     public id: number,
@@ -149,6 +163,11 @@ export class Player {
     this.goal = this.target = -1;
     this.repath = this.seen = this.stuck = this.nextVision = 0;
     this.heard = null;
+    this.threat = -1;
+    this.threatAt = -10;
+    this.strafe = this.strafeUntil = this.chaseAt = 0;
+    this.lane = null;
+    this.chase = [];
     this.nadeUsed = false;
     this.smokeUsed = false;
     this.burstLeft = 0;

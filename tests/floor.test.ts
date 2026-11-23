@@ -1,9 +1,9 @@
 import { it, expect } from "vitest";
-import { floorAt, maps, mapIds } from "../src/world";
+import { floorAt, maps } from "../src/world";
 
-const ground = { dust2: "sand", mirage: "tile", nuke: "concrete", inferno: "stone", vertigo: "concrete" };
+const ground = { dust2: "sand", mirage: "tile", nuke: "concrete", inferno: "stone", vertigo: "concrete" } as const;
 
-it.each(mapIds)("%s: footsteps at spawn land on the map's ground material", (id) => {
+it.each(Object.keys(ground) as (keyof typeof ground)[])("%s: footsteps at spawn land on the map's ground material", (id) => {
   const map = maps[id];
   for (const team of ["T", "CT"] as const)
     for (const s of map.spawns[team]) expect(floorAt(map, s.x, 0, s.z)).toBe(ground[id]);

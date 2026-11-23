@@ -1,5 +1,13 @@
 export type Team = "CT" | "T";
-export type GridMapId = "dust2" | "mirage" | "nuke" | "inferno" | "vertigo";
+export type GridMapId =
+  | "dust2"
+  | "mirage"
+  | "nuke"
+  | "inferno"
+  | "vertigo"
+  | "switchyard"
+  | "canopy"
+  | "foundry";
 export type MapId = GridMapId | "range";
 export const mapIds: GridMapId[] = [
   "dust2",
@@ -7,6 +15,9 @@ export const mapIds: GridMapId[] = [
   "nuke",
   "inferno",
   "vertigo",
+  "switchyard",
+  "canopy",
+  "foundry",
 ];
 export interface Vec3 {
   x: number;
@@ -43,7 +54,19 @@ export interface Box extends Rect {
     | "tank"
     | "barrier"
     | "fountain"
-    | "scaffold";
+    | "scaffold"
+    // Set pieces drawn in detail by `scenery.ts`; the box is their collision.
+    | "railcar"
+    | "tanker"
+    | "bogie"
+    | "loco"
+    | "column"
+    | "idol"
+    | "plank"
+    | "shelf"
+    | "pallet"
+    | "forklift"
+    | "tree";
 }
 export interface Ramp extends Rect {
   h: number;
@@ -79,6 +102,13 @@ interface Kit {
   road(...corners: Tile[]): void;
   /** Keeps a non-walkable cell free of generated buildings for a set piece. */
   hold(x: number, z: number): void;
+  /** Takes a cell out of a room (e.g. inside a site) and holds it for a set piece. */
+  block(x: number, z: number): void;
+  /**
+   * A thin ground cover (gravel, soil, planks, steel plate) over the main floor. Its material
+   * sets footstep sounds and bullet impacts; `top` is the surface height.
+   */
+  patch(x: number, z: number, w: number, d: number, mat: MaterialId, top?: number): void;
   box(
     x: number,
     y: number,
@@ -160,6 +190,13 @@ function gridMap(spec: GridSpec): MapDef {
     },
     hold(x, z) {
       held[z][x] = true;
+    },
+    block(x, z) {
+      mask[z][x] = false;
+      held[z][x] = true;
+    },
+    patch(x, z, w, d, mat, top = 0.03) {
+      box(x, top - 0.03, z, w, 0.06, d, mat, "floor");
     },
     box,
     prop(tx, tz, dx, dz, w, h, d, mat, style) {
@@ -837,6 +874,413 @@ const vertigo: GridSpec = {
   staging: { A: ["A Ramp", "Elevators", "A Ramp"], B: ["B Stairs"] },
 };
 
+/**
+ * Freight yard: two tracks of parked wagons split the middle into lanes that only meet at
+ * level crossings. B is a locomotive shed; A is a raised loading dock.
+ */
+const switchyard: GridSpec = {
+  id: "switchyard",
+  name: "Switchyard",
+  t: [10, 18],
+  ct: [10, 2],
+  a: [16, 6],
+  b: [4, 6],
+  tRoom: [8, 17, 12, 19],
+  ctRoom: [8, 1, 12, 3],
+  floor: "concrete",
+  wall: "plaster",
+  trim: "metal",
+  height: [5, 4.2],
+  layout(k) {
+    // Sidings leave T spawn on both sides and turn north onto the platform.
+    k.road([10, 18], [5, 18], [5, 14]);
+    k.road([10, 18], [15, 18], [15, 14]);
+    k.road([4, 14], [16, 14]);
+    // Yard lanes either side of the two tracks, crossed only at level crossings.
+    k.road([3, 12], [17, 12]);
+    k.road([3, 10], [17, 10]);
+    for (const x of [7, 13]) k.room(x, 13, x, 13);
+    for (const x of [4, 10, 16]) k.room(x, 11, x, 11);
+    for (let x = 2; x <= 18; x++) {
+      k.hold(x, 13);
+      k.hold(x, 11);
+    }
+    // North yard into both sites, and the signal-box cut to A.
+    k.road([4, 10], [4, 9]);
+    k.road([16, 10], [16, 9]);
+    k.road([13, 10], [13, 7]);
+    k.hold(12, 9);
+    k.hold(12, 8);
+    // CT side: gates to each site and the underpass to the north yard.
+    k.road([12, 2], [16, 2], [16, 4]);
+    k.road([8, 2], [4, 2], [4, 4]);
+    k.road([10, 4], [10, 6], [9, 6], [9, 9], [10, 9], [10, 10]);
+    // The shed's west bay holds the locomotive.
+    for (const z of [5, 6, 7]) k.block(2, z);
+  },
+  raised: [[16, 6, 1.2]],
+  decorate(k) {
+    // Ballast under both tracks, wooden decking at the crossings, pavers on the platform.
+    k.patch(52.5, 57.5, 85, 4.6, "dirt");
+    k.patch(52.5, 67.5, 85, 4.6, "dirt");
+    for (const x of [7, 13]) k.patch(center(x), 67.5, 4.6, 4.6, "wood", 0.05);
+    for (const x of [4, 10, 16]) k.patch(center(x), 57.5, 4.6, 4.6, "wood", 0.05);
+    k.patch(52.5, 72.5, 65, 4.8, "stone");
+    k.roof(tiles(2, 4, 6, 8), "metal", 4.6);
+    k.box(12.5, 4.6, 32.5, 5, 0.55, 15, "metal", "roof");
+    k.roof(
+      [
+        [9, 6],
+        [9, 7],
+        [9, 8],
+        [9, 9],
+        [10, 5],
+        [10, 6],
+      ],
+      "concrete",
+      3.7,
+    );
+    // Wagons: a body on two bogies, with a gap underneath to catch feet.
+    const car = (x0: number, x1: number, z: number, style: Box["style"]) => {
+      k.box((x0 + x1) / 2, 2.55, z, x1 - x0, 3.1, 2.9, "metal", style);
+      for (const end of [x0 + 1.9, x1 - 1.9])
+        k.box(end, 0.5, z, 2.6, 1, 2.2, "metal", "bogie");
+    };
+    car(10.2, 22.4, 67.5, "railcar");
+    car(22.8, 34.8, 67.5, "railcar");
+    car(40.2, 51.6, 67.5, "railcar");
+    // A shoulder-width gap between these two lets a player squeeze through.
+    car(53, 64.8, 67.5, "railcar");
+    car(70.2, 82.3, 67.5, "tanker");
+    car(82.7, 94.8, 67.5, "railcar");
+    car(10.2, 19.8, 57.5, "tanker");
+    car(25.2, 37.3, 57.5, "railcar");
+    car(37.7, 49.8, 57.5, "railcar");
+    car(55.2, 67.3, 57.5, "railcar");
+    car(67.7, 79.8, 57.5, "tanker");
+    car(85.2, 94.8, 57.5, "railcar");
+    // Shunting locomotive parked in the shed.
+    k.box(12.5, 2.3, 32.5, 3, 3.6, 13.4, "metal", "loco");
+    // Signal box: a hollow timber hut, so a shot goes clean through both walls.
+    const hut = { x: 62.5, z: 47.5 };
+    k.box(hut.x, 1.5, hut.z - 1.73, 3.6, 3, 0.14, "wood", "plank");
+    k.box(hut.x, 1.5, hut.z + 1.73, 3.6, 3, 0.14, "wood", "plank");
+    k.box(hut.x - 1.73, 1.5, hut.z, 0.14, 3, 3.32, "wood", "plank");
+    k.box(hut.x + 1.73, 1.5, hut.z, 0.14, 3, 3.32, "wood", "plank");
+    k.box(hut.x, 3.1, hut.z, 4.1, 0.2, 4.1, "wood", "roof");
+    k.prop(12, 8, 0, 0, 3.2, 1.1, 2.4, "wood", "pallet");
+    // Shed: plank partitions, a workbench and spare wheelsets.
+    k.prop(5, 4, 1.5, -1.5, 1.7, 2.3, 0.16, "wood", "plank");
+    k.prop(6, 7, 1.5, 1.5, 0.16, 2.3, 1.7, "wood", "plank");
+    k.prop(4, 8, -1.55, 1.5, 1.6, 1.0, 0.9, "wood", "crate");
+    k.crates(6, 5);
+    k.prop(3, 8, 1.5, 1.4, 1.5, 1.2, 1.5, "wood", "pallet");
+    // Dock: crates, a fence and pallets of goods waiting to load.
+    k.crates(15, 5);
+    k.crates(17, 7);
+    k.prop(17, 4, 1.5, -1.5, 1.6, 1.4, 1.6, "cardboard", "pallet");
+    k.prop(14, 7, -1.5, 1.5, 1.7, 2.2, 0.14, "wood", "plank");
+    k.prop(18, 5, 1.5, 1.5, 0.14, 2.2, 1.7, "wood", "plank");
+    // Cover along the lanes and the platform.
+    k.prop(6, 12, 1.5, 1.55, 1.6, 1.2, 1.6, "wood", "crate");
+    k.prop(11, 12, -1.5, -1.55, 1.6, 1.1, 1.6, "concrete", "barrier");
+    k.prop(15, 12, 1.5, 1.55, 1.6, 1.3, 1.6, "cardboard", "pallet");
+    k.prop(8, 10, -1.5, -1.55, 1.6, 1.1, 1.6, "concrete", "barrier");
+    k.prop(14, 10, 1.5, -1.55, 1.6, 1.5, 1.6, "wood", "crate");
+    k.prop(5, 10, -1.5, 1.55, 1.6, 1.2, 1.6, "wood", "pallet");
+    k.prop(8, 14, 1.4, 1.5, 1.8, 0.9, 0.7, "wood", "bench");
+    k.prop(12, 14, -1.4, 1.5, 1.8, 0.9, 0.7, "wood", "bench");
+    k.prop(10, 14, 0, 1.55, 1.5, 1.6, 1.4, "cardboard", "pallet");
+    k.prop(5, 16, 1.5, 1.5, 1.6, 1.6, 1.6, "wood", "crate");
+    k.prop(15, 17, -1.5, -1.5, 1.6, 1.2, 1.6, "metal", "container");
+    k.doors(4, 9);
+    k.doors(10, 5);
+  },
+  callouts: [
+    ["Platform", [10, 14]],
+    ["Yard", [10, 12]],
+    ["North Yard", [7, 10]],
+    ["Underpass", [9, 8]],
+    ["Signal Box", [13, 8]],
+    ["West Sidings", [5, 16]],
+    ["East Sidings", [15, 16]],
+    ["Shed Doors", [4, 9]],
+    ["Dock Ramp", [16, 9]],
+    ["A Gate", [16, 3]],
+    ["B Gate", [4, 3]],
+  ],
+  staging: {
+    A: ["East Sidings", "Platform", "East Sidings"],
+    B: ["West Sidings", "Platform"],
+  },
+};
+
+/**
+ * Overgrown temple ruins: a flooded cave to B, stone stairs to the raised A sanctum, and a
+ * narrow mid with jungle trees growing through the old courtyards.
+ */
+const canopy: GridSpec = {
+  id: "canopy",
+  name: "Canopy",
+  t: [10, 18],
+  ct: [10, 2],
+  a: [15, 5],
+  b: [5, 6],
+  tRoom: [8, 17, 12, 19],
+  ctRoom: [8, 1, 12, 3],
+  floor: "stone",
+  wall: "stone",
+  trim: "stone",
+  height: [5.6, 4.4],
+  layout(k) {
+    // West: through the cave to B Main.
+    k.road([8, 18], [3, 18], [3, 11], [4, 11], [4, 9]);
+    // East: the long temple stairs up to A Main.
+    k.road([12, 18], [17, 18], [17, 10], [16, 10], [16, 8]);
+    // Mid leaves T spawn's north gate, then splits to Donut (A) and Elbow (B).
+    k.road([9, 17], [9, 14], [7, 14], [7, 12], [11, 12]);
+    k.road([11, 12], [11, 10], [13, 10], [13, 8]);
+    k.road([7, 12], [6, 12], [6, 10], [7, 10], [7, 9]);
+    // CT side.
+    k.road([12, 2], [14, 2], [14, 3]);
+    k.road([8, 2], [5, 2], [5, 4]);
+    k.road([10, 4], [10, 6], [9, 6], [9, 9], [10, 9], [10, 11]);
+    for (const [x, z] of [
+      [5, 11],
+      [8, 10],
+      [12, 8],
+      [16, 12],
+      [16, 15],
+      [2, 17],
+    ] as Tile[])
+      k.hold(x, z);
+  },
+  raised: [
+    [15, 5, 1.4],
+    [17, 14, 1.2],
+  ],
+  decorate(k) {
+    // Jungle soil on the paths, worn flagstones in the sites and courtyards.
+    k.patch(center(3), 72.5, 4.8, 34.8, "dirt");
+    k.patch(32.5, center(18), 24.8, 4.8, "dirt");
+    k.patch(center(17), 85, 4.8, 19.8, "dirt");
+    k.patch(center(17), 55, 4.8, 9.8, "dirt");
+    k.patch(center(9), 77.5, 4.8, 14.8, "dirt");
+    k.patch(center(6), 55, 4.8, 9.8, "dirt");
+    k.roof(
+      [
+        [3, 12],
+        [3, 13],
+        [3, 14],
+        [3, 15],
+        [3, 16],
+      ],
+      "stone",
+      3.8,
+    );
+    k.roof(
+      [
+        [9, 6],
+        [9, 7],
+        [9, 8],
+        [10, 5],
+        [10, 6],
+      ],
+      "stone",
+      4,
+    );
+    // Trees grow in the held cells beside the paths.
+    for (const [x, z] of [
+      [5, 11],
+      [8, 10],
+      [12, 8],
+      [16, 12],
+      [16, 15],
+      [2, 17],
+    ] as Tile[])
+      k.prop(x, z, 0, 0, 1.3, 9, 1.3, "wood", "tree");
+    // Sanctum: columns at the corners, a carved idol, and old offerings.
+    for (const [x, z, dx, dz, h] of [
+      [13, 4, -1.5, -1.5, 3.8],
+      [17, 4, 1.5, -1.5, 2.1],
+      [13, 6, -1.5, 1.5, 1.6],
+      [17, 6, 1.5, 1.5, 3.8],
+    ] as const)
+      k.prop(x, z, dx, dz, 1.15, h, 1.15, "stone", "column");
+    k.prop(16, 3, 1.4, -1.4, 1.6, 2.6, 1.6, "stone", "idol");
+    k.crates(14, 7);
+    k.prop(16, 7, 1.5, 1.5, 1.7, 2.1, 0.16, "wood", "plank");
+    k.prop(16, 9, 1.5, -1.5, 0.16, 2.1, 1.7, "wood", "plank");
+    // B: broken columns around the flooded courtyard and a timber scaffold.
+    k.prop(3, 4, -1.5, -1.5, 1.15, 3.8, 1.15, "stone", "column");
+    k.prop(7, 4, 1.5, -1.5, 1.15, 1.4, 1.15, "stone", "column");
+    k.prop(3, 8, -1.5, 1.5, 1.15, 2.4, 1.15, "stone", "column");
+    k.prop(4, 5, 1.5, 1.5, 1.6, 1.0, 1.6, "stone", "barrier");
+    k.prop(6, 7, -1.5, -1.5, 1.7, 2.2, 0.16, "wood", "plank");
+    k.prop(7, 7, 1.5, 1.5, 1.6, 1.5, 1.6, "wood", "crate");
+    k.prop(5, 3, 1.4, -1.4, 1.5, 2.4, 1.5, "stone", "idol");
+    // Mid and the side paths.
+    k.prop(9, 15, 1.5, -1.5, 1.6, 1.2, 1.6, "stone", "barrier");
+    k.prop(8, 12, -1.5, 1.5, 1.15, 2.6, 1.15, "stone", "column");
+    k.prop(11, 11, 1.5, 1.5, 1.6, 1.3, 1.6, "wood", "crate");
+    k.prop(13, 9, 1.5, -1.5, 1.7, 2.2, 0.16, "wood", "plank");
+    k.prop(6, 10, -1.5, -1.5, 1.6, 1.1, 1.6, "stone", "barrier");
+    k.prop(17, 11, 1.5, 1.5, 1.6, 1.4, 1.6, "wood", "crate");
+    k.prop(3, 17, -1.5, -1.5, 1.15, 3.2, 1.15, "stone", "column");
+    k.prop(17, 17, 1.5, 1.5, 1.15, 2.2, 1.15, "stone", "column");
+    k.prop(10, 4, 1.5, 1.5, 1.6, 1.0, 1.6, "stone", "barrier");
+  },
+  callouts: [
+    ["Cave", [3, 14]],
+    ["Temple Stairs", [17, 14]],
+    ["A Main", [17, 11]],
+    ["Mid", [9, 12]],
+    ["Donut", [12, 10]],
+    ["Elbow", [6, 11]],
+    ["House", [9, 7]],
+    ["B Main", [4, 10]],
+    ["Lookout", [14, 2]],
+    ["Ruins", [5, 3]],
+    ["Jungle", [5, 18]],
+  ],
+  staging: {
+    A: ["Temple Stairs", "Donut", "Temple Stairs"],
+    B: ["Cave", "Elbow"],
+  },
+};
+
+/**
+ * Steel works: a container yard at B, a racked warehouse at A, and a covered vent run linking
+ * mid to the A floor.
+ */
+const foundry: GridSpec = {
+  id: "foundry",
+  name: "Foundry",
+  t: [10, 18],
+  ct: [10, 2],
+  a: [15, 5],
+  b: [5, 6],
+  tRoom: [8, 17, 12, 19],
+  ctRoom: [8, 1, 12, 3],
+  floor: "concrete",
+  wall: "concrete",
+  trim: "metal",
+  height: [5.6, 3.6],
+  layout(k) {
+    // East: the loading street to A Main.
+    k.road([12, 18], [16, 18], [16, 14], [17, 14], [17, 9], [16, 9], [16, 8]);
+    // West: through the scrap yard to B Main.
+    k.road([8, 18], [4, 18], [4, 15], [2, 15], [2, 10], [3, 10], [3, 9]);
+    // Mid: Highway, the Vents to A, and the Z connector to B.
+    k.road([11, 17], [11, 14], [9, 14], [9, 12], [12, 12]);
+    k.road([12, 12], [13, 12], [13, 9], [14, 9], [14, 8]);
+    k.road([9, 12], [6, 12], [6, 10], [5, 10], [5, 9]);
+    // CT side.
+    k.road([12, 2], [15, 2], [15, 3]);
+    k.road([8, 2], [5, 2], [5, 4]);
+    k.road([10, 4], [10, 7], [11, 7], [11, 9], [10, 9], [10, 11]);
+    // Container stacks in the B yard and the foreman's office on A.
+    for (const [x, z] of [
+      [3, 5],
+      [3, 6],
+      [7, 7],
+      [17, 4],
+      [17, 5],
+    ] as Tile[])
+      k.block(x, z);
+    k.hold(15, 17);
+    k.hold(6, 17);
+  },
+  raised: [[2, 12, 1.3]],
+  decorate(k) {
+    k.roof(tiles(13, 3, 17, 7), "metal", 4.8);
+    k.roof(
+      [
+        [13, 9],
+        [13, 10],
+        [13, 11],
+        [14, 9],
+      ],
+      "metal",
+      3.6,
+    );
+    k.roof(
+      [
+        [10, 7],
+        [11, 7],
+        [11, 8],
+        [11, 9],
+      ],
+      "concrete",
+      3.6,
+    );
+    // Steel deck plates in the vents and the warehouse aisles; grit in the scrap yard.
+    k.patch(center(13), 52.5, 4.8, 14.8, "metal");
+    k.patch(center(14), center(9), 4.8, 4.8, "metal");
+    k.patch(center(2), 62.5, 4.8, 24.8, "dirt");
+    k.patch(center(3), center(15), 14.8, 4.8, "dirt");
+    // Shipping containers: a two-high stack and a single.
+    k.box(17.5, 1.3, 30, 2.44, 2.6, 9.4, "metal", "container");
+    k.box(17.5, 3.9, 28.4, 2.44, 2.6, 6.06, "metal", "container");
+    k.box(37.5, 1.3, 37.5, 4.7, 2.6, 2.44, "metal", "container");
+    // Office: thin partitions you can shoot through, with a window strip.
+    const o = { x: 87.5, z: 25 };
+    k.box(o.x - 2.2, 1.4, o.z, 0.12, 2.8, 9.6, "plaster", "plank");
+    k.box(o.x, 1.4, o.z - 4.75, 4.4, 2.8, 0.12, "plaster", "plank");
+    k.box(o.x, 1.4, o.z + 4.75, 4.4, 2.8, 0.12, "plaster", "plank");
+    k.box(o.x, 2.95, o.z, 4.6, 0.3, 9.8, "metal", "roof");
+    // Warehouse racking in the corners of the A floor.
+    for (const [x, z, dx, dz] of [
+      [13, 3, -1.5, -1.5],
+      [15, 3, -1.5, -1.5],
+      [13, 7, -1.5, 1.5],
+      [15, 7, 1.5, 1.5],
+      [14, 5, 1.5, 1.5],
+    ] as const)
+      k.prop(x, z, dx, dz, 1.8, 3.2, 1.1, "metal", "shelf");
+    k.prop(16, 6, 1.5, -1.5, 1.6, 1.5, 1.6, "cardboard", "pallet");
+    k.crates(14, 4);
+    k.prop(16, 8, -1.5, 1.5, 1.6, 1.3, 1.6, "wood", "crate");
+    // B yard: forklift, pallets and drums.
+    k.prop(4, 7, 1.5, -1.4, 1.3, 2.3, 1.8, "metal", "forklift");
+    k.prop(6, 5, 1.5, -1.5, 1.6, 1.3, 1.6, "wood", "pallet");
+    k.prop(5, 8, -1.5, 1.5, 1.6, 1.6, 1.6, "wood", "crate");
+    k.prop(7, 4, 1.5, -1.5, 1.7, 2.2, 0.14, "wood", "plank");
+    k.prop(6, 8, 1.5, 1.5, 1.4, 1.1, 1.4, "metal", "tank");
+    // Mid and the approaches.
+    k.prop(10, 12, 1.5, 1.5, 1.6, 1.1, 1.4, "concrete", "barrier");
+    k.prop(7, 12, -1.5, 1.5, 1.6, 1.4, 1.6, "wood", "crate");
+    k.prop(12, 12, 1.5, 1.5, 1.6, 1.2, 1.6, "cardboard", "pallet");
+    k.prop(9, 13, 1.5, 1.5, 1.6, 2.2, 0.14, "wood", "plank");
+    k.prop(17, 12, 1.5, -1.5, 1.6, 2.4, 1.6, "metal", "container");
+    k.prop(16, 16, 1.5, 1.5, 1.6, 1.2, 1.6, "wood", "crate");
+    k.prop(3, 15, -1.5, -1.5, 1.6, 1.3, 1.6, "metal", "tank");
+    k.prop(2, 14, -1.5, 1.5, 1.6, 1.0, 1.6, "wood", "pallet");
+    k.prop(15, 17, 0, 0, 4.2, 2.6, 2.44, "metal", "container");
+    k.prop(6, 17, 0, 0, 3.2, 1.4, 3.2, "wood", "pallet");
+    k.prop(10, 5, -1.5, 1.5, 1.6, 1.1, 1.6, "concrete", "barrier");
+    k.doors(17, 9);
+    k.doors(13, 9);
+  },
+  callouts: [
+    ["Highway", [9, 12]],
+    ["Vents", [13, 10]],
+    ["Z Connector", [6, 11]],
+    ["A Main", [17, 11]],
+    ["Loading Street", [14, 18]],
+    ["Scrap Yard", [2, 13]],
+    ["B Main", [3, 10]],
+    ["Checkers", [11, 8]],
+    ["A Office", [16, 4]],
+    ["Forklift", [4, 7]],
+    ["CT Ramp", [15, 2]],
+  ],
+  staging: {
+    A: ["Loading Street", "Vents", "A Main"],
+    B: ["Scrap Yard", "Z Connector"],
+  },
+};
+
 function firingRange(): MapDef {
   const size = 50.8;
   const boxes: Box[] = [
@@ -905,6 +1349,9 @@ export const maps: Record<MapId, MapDef> = {
   nuke: gridMap(nuke),
   inferno: gridMap(inferno),
   vertigo: gridMap(vertigo),
+  switchyard: gridMap(switchyard),
+  canopy: gridMap(canopy),
+  foundry: gridMap(foundry),
   range: firingRange(),
 };
 
