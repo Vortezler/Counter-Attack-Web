@@ -123,3 +123,26 @@ describe("battle royale", () => {
     expect(new Set(s.players.filter((p) => p.alive).map((p) => p.team)).size).toBeLessThanOrEqual(1);
   }, 90_000);
 });
+
+describe("deathmatch ammo", () => {
+  it("never runs out of spare magazines, but every magazine still has to be reloaded", () => {
+    const s = make({ kind: "deathmatch", solo: false }, false),
+      p = s.me;
+    expect(s.endlessAmmo).toBe(true);
+    p.primary = magazine("ak");
+    p.weapon = "ak";
+    p.drawEnd = 0;
+    p.primary.reserve = 0;
+    // Empty the magazine; it reloads by itself even with nothing in reserve, five times over.
+    for (let mag = 0; mag < 5; mag++) {
+      p.primary.ammo = 0;
+      p.reloadEnd = 0;
+      for (let i = 0; i < 64 * 3; i++) s.step({ [p.id]: { ...idle(p.yaw, p.pitch) } });
+      expect(p.primary.ammo).toBe(30);
+    }
+    expect(p.primary.reserve).toBe(0);
+  });
+  it("is off in battle royale", () => {
+    expect(make({ kind: "royale", solo: true }).endlessAmmo).toBe(false);
+  });
+});

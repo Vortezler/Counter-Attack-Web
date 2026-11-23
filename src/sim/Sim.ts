@@ -164,6 +164,8 @@ export class Sim {
   smokes: Smoke[] = [];
   fires: Fire[] = [];
   drops: Drop[] = [];
+  /** Spare magazines never run out (deathmatch): reloads still take time but never drain the reserve. */
+  endlessAmmo = false;
   nextGrenade = 0;
   nextDrop = 0;
   lastBeep = 0;
@@ -530,20 +532,20 @@ export class Sim {
         const m = p.mag;
         if (m && shellFed(m.id)) {
           // Shotguns load one shell at a time and keep going until full or out of shells.
-          if (m.reserve > 0 && m.ammo < catalog[m.id].mag) {
+          if ((m.reserve > 0 || this.endlessAmmo) && m.ammo < catalog[m.id].mag) {
             m.ammo++;
-            m.reserve--;
+            if (!this.endlessAmmo) m.reserve--;
             this.emit({ type: "shell", actor: p.id, pos: p.eye, weapon: m.id });
           }
-          const more = m.ammo < catalog[m.id].mag && m.reserve > 0;
+          const more = m.ammo < catalog[m.id].mag && (m.reserve > 0 || this.endlessAmmo);
           p.reloadFrom = this.time;
           p.reloadEnd = more ? this.time + shellTime(m.id) : 0;
         } else {
           // A fresh magazine goes in on top of whatever is still in the chamber (0 or 1).
           if (m) {
-            const amount = Math.min(m.reserve, catalog[m.id].mag);
+            const amount = this.endlessAmmo ? catalog[m.id].mag : Math.min(m.reserve, catalog[m.id].mag);
             m.ammo += amount;
-            m.reserve -= amount;
+            if (!this.endlessAmmo) m.reserve -= amount;
           }
           p.reloadEnd = 0;
         }
@@ -556,13 +558,13 @@ export class Sim {
         p.mag &&
         // A magazine gun can top up to a full magazine plus one in the chamber.
         p.mag.ammo < catalog[p.mag.id].mag + (shells ? 0 : 1) &&
-        p.mag.reserve
+        (p.mag.reserve || this.endlessAmmo)
       ) {
         if (!shells) {
           // The partly used magazine comes out (its rounds go back to the reserve); a round
           // already chambered stays, and can still be fired while the new magazine goes in.
           const chambered = Math.min(1, p.mag.ammo);
-          p.mag.reserve += p.mag.ammo - chambered;
+          if (!this.endlessAmmo) p.mag.reserve += p.mag.ammo - chambered;
           p.mag.ammo = chambered;
         }
         p.reloadFrom = this.time;

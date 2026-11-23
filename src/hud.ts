@@ -515,7 +515,7 @@ export class MatchHud {
       el.ammo,
       String(view.mag?.ammo ?? (isNade(view.weapon) ? view[view.weapon] : "•")),
     );
-    label(el.reserve, view.mag ? " / " + view.mag.reserve : "");
+    label(el.reserve, view.mag ? " / " + (this.sim.endlessAmmo ? "∞" : view.mag.reserve) : "");
     const site = s.map.callouts.reduce(
       (best, n) =>
         (view.x - n.x) ** 2 + (view.z - n.z) ** 2 <
@@ -609,7 +609,7 @@ export class MatchHud {
     const s = this.sim,
       rows: [Action, string, string, boolean, number][] = [];
     const mag = (m: { ammo: number; reserve: number }) =>
-      m.ammo + " / " + m.reserve;
+      m.ammo + " / " + (s.endlessAmmo ? "∞" : m.reserve);
     if (view.primary)
       rows.push([
         "primary",

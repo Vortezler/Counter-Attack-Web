@@ -111,6 +111,8 @@ export class ArenaSim extends Sim {
     // "casual" gives the base game no friendly fire between teammates.
     super(map, side, difficulty, name, seed, botsOnly, "casual");
     this.arena = rules;
+    // Deathmatch: reload as usual, but never run out of spare magazines.
+    this.endlessAmmo = rules.kind === "deathmatch";
     this.begin();
   }
   get deathmatch() {
