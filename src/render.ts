@@ -3,6 +3,8 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Box, MapDef, Team, Vec3 } from "./world";
 import { BloodFx } from "./blood";
+import { surface } from "./materials";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import {
   hold,
   humanoid,
@@ -616,72 +618,6 @@ function makeCanvas(w: number, h: number) {
   canvas.height = h;
   return { canvas, ctx: canvas.getContext("2d")! };
 }
-function texture(kind: string) {
-  const { canvas, ctx } = makeCanvas(128, 128),
-    rng = seeded(kind.length * 83);
-  const base =
-    (
-      {
-        wood: "#b5a48c",
-        sand: "#ded5c1",
-        stone: "#d6cfbd",
-        metal: "#afb3ad",
-        tile: "#c9c6b6",
-        plaster: "#e7e3d8",
-        concrete: "#d3ccbd",
-        dirt: "#d1c3a9",
-        cardboard: "#c6ae84",
-        glass: "#9aaea7",
-        foliage: "#879276",
-      } as Record<string, string>
-    )[kind] || "#d4cec0";
-  ctx.fillStyle = base;
-  ctx.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 9500; i++) {
-    ctx.fillStyle =
-      rng() < 0.52 ? "rgba(31,27,21,.045)" : "rgba(255,253,236,.065)";
-    ctx.fillRect(rng() * 128, rng() * 128, 0.4 + rng() * 2, 0.5 + rng() * 2);
-  }
-  if (kind === "stone" || kind === "tile" || kind === "sand") {
-    ctx.strokeStyle =
-      kind === "tile"
-        ? "rgba(75,69,54,.34)"
-        : kind === "stone"
-          ? "rgba(73,65,46,.22)"
-          : "rgba(80,70,55,.085)";
-    ctx.lineWidth = 1;
-    for (let y = 0; y < 128; y += 32) {
-      ctx.beginPath();
-      ctx.moveTo(0, y + 0.5);
-      ctx.lineTo(128, y + 0.5);
-      ctx.stroke();
-      for (let x = y % 64 === 0 ? 0 : 32; x < 128; x += 64) {
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x, y + 32);
-        ctx.stroke();
-      }
-    }
-  } else if (kind === "wood" || kind === "metal") {
-    for (let i = 0; i < 128; i += kind === "wood" ? 2 : 12) {
-      ctx.fillStyle =
-        kind === "metal"
-          ? "rgba(28,42,40,.18)"
-          : `rgba(65,47,29,${0.038 + rng() * 0.08})`;
-      ctx.fillRect(i, 0, kind === "metal" ? 3 : 1, 128);
-    }
-    if (kind === "wood")
-      for (let i = 0; i < 128; i += 32) {
-        ctx.fillStyle = "rgba(48,33,24,.42)";
-        ctx.fillRect(i, 0, 1.6, 128);
-      }
-  }
-  const t = new THREE.CanvasTexture(canvas);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.anisotropy = 4;
-  return t;
-}
 function sky(theme: Theme) {
   const { canvas, ctx } = makeCanvas(16, 512);
   const g = ctx.createLinearGradient(0, 0, 0, 512);
@@ -869,15 +805,70 @@ const themes: Record<string, Theme> = {
 };
 const themeOf = (id: string) => themes[id] ?? themes.dust2;
 const axes = new THREE.Vector3(0, 1, 0);
+/** Smooth 3D value noise in 0..1 for large-scale colour variation across the world. */
+function worldNoise(x: number, y: number, z: number) {
+  const h = (i: number, j: number, k: number) => {
+    let n = Math.imul(i, 73856093) ^ Math.imul(j, 19349663) ^ Math.imul(k, 83492791);
+    n = Math.imul(n ^ (n >>> 13), 1274126177);
+    return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+  };
+  const x0 = Math.floor(x),
+    y0 = Math.floor(y),
+    z0 = Math.floor(z),
+    s = (t: number) => t * t * (3 - 2 * t),
+    fx = s(x - x0),
+    fy = s(y - y0),
+    fz = s(z - z0),
+    l = (a: number, b: number, t: number) => a + (b - a) * t;
+  return l(
+    l(l(h(x0, y0, z0), h(x0 + 1, y0, z0), fx), l(h(x0, y0 + 1, z0), h(x0 + 1, y0 + 1, z0), fx), fy),
+    l(l(h(x0, y0, z0 + 1), h(x0 + 1, y0, z0 + 1), fx), l(h(x0, y0 + 1, z0 + 1), h(x0 + 1, y0 + 1, z0 + 1), fx), fy),
+    fz,
+  );
+}
+/** Dark-to-clear gradient for contact shadows where walls and props meet the ground. */
+function contactTexture() {
+  const { canvas, ctx } = makeCanvas(4, 64),
+    g = ctx.createLinearGradient(0, 0, 0, 64);
+  g.addColorStop(0, "rgba(0,0,0,0.5)");
+  g.addColorStop(0.25, "rgba(0,0,0,0.26)");
+  g.addColorStop(0.6, "rgba(0,0,0,0.07)");
+  g.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 4, 64);
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+/**
+ * World materials keep the texel's own colour where its alpha is low (rust, exposed brick,
+ * bare steel, grout) instead of multiplying it by the theme tint in the vertex colour; those
+ * texels still take the vertex colour's brightness, so grime and weathering apply.
+ */
+function tintMask(shader: { fragmentShader: string }) {
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      "#include <map_fragment>",
+      `float tintMask = 1.0;
+#ifdef USE_MAP
+  vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+  tintMask = sampledDiffuseColor.a;
+  diffuseColor.rgb *= sampledDiffuseColor.rgb;
+#endif`,
+    )
+    .replace(
+      "#include <color_fragment>",
+      `#if defined( USE_COLOR )
+  float shadeOnly = clamp( dot( vColor.rgb, vec3( 0.299, 0.587, 0.114 ) ) * 1.45, 0.5, 1.0 );
+  diffuseColor.rgb *= mix( vec3( shadeOnly ), vColor.rgb, tintMask );
+#endif`,
+    );
+}
 function worldMeshes(map: MapDef, scene: THREE.Scene) {
   const theme = themeOf(map.id),
     rng = seeded(theme.seed),
     batch = new Map<string, Batch>();
-  const basic = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    roughness: 0.92,
-  });
-  batch.set("plain", { geo: [], mat: basic });
+  const tint = new THREE.Color();
   function add(
     geo: THREE.BufferGeometry,
     x: number,
@@ -904,35 +895,67 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
     geo.translate(x, y, z);
     const pos = geo.getAttribute("position"),
       nor = geo.getAttribute("normal"),
-      uv = geo.getAttribute("uv");
-    const c = new THREE.Color(color),
+      uv = geo.getAttribute("uv"),
+      kind = key === "plain" ? "grain" : key,
+      look = surface(kind),
+      // Small fixtures keep their own UVs scaled down; walls and floors are mapped in world metres.
+      k = 1 / look.scale;
+    const c = tint.set(color),
       colors = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
-      const ax = Math.abs(nor.getX(i)),
-        ay = Math.abs(nor.getY(i)),
-        az = Math.abs(nor.getZ(i));
-      if (key !== "plain") {
-        uv.setXY(
-          i,
-          (ax > az && ax > ay ? pos.getZ(i) : pos.getX(i)) * 0.45,
-          (ay > ax && ay > az ? pos.getZ(i) : pos.getY(i)) * 0.45,
-        );
-      }
-      const shade = 1 - Math.max(0, 1 - pos.getY(i) / 3) * 0.13;
-      colors[i * 3] = c.r * shade;
-      colors[i * 3 + 1] = c.g * shade;
-      colors[i * 3 + 2] = c.b * shade;
+      const nx = nor.getX(i),
+        ny = nor.getY(i),
+        nz = nor.getZ(i),
+        ax = Math.abs(nx),
+        ay = Math.abs(ny),
+        az = Math.abs(nz),
+        px = pos.getX(i),
+        py = pos.getY(i),
+        pz = pos.getZ(i);
+      uv.setXY(
+        i,
+        (ax > az && ax > ay ? pz : px) * k,
+        (ay > ax && ay > az ? pz : py) * k,
+      );
+      // Weathering: broad patches of lighter and darker, slightly warmer or cooler, material.
+      const n = worldNoise(px * 0.11, py * 0.11, pz * 0.11) * 0.65 + worldNoise(px * 0.37 + 9, py * 0.37, pz * 0.37) * 0.35,
+        warm = (worldNoise(px * 0.05 + 31, py * 0.05, pz * 0.05) - 0.5) * 0.07;
+      let lum = 0.9 + 0.2 * n,
+        r = 1 + warm,
+        g = 1,
+        b = 1 - warm;
+      if (ay < 0.6) {
+        // Ground grime: walls darken and brown toward their base, as dust and splash-back collect.
+        const low = Math.max(0, 1 - py / 1.5) ** 1.6;
+        lum *= 1 - 0.3 * low;
+        g *= 1 - 0.03 * low;
+        b *= 1 - 0.09 * low;
+        // Sun-bleached tops on tall walls.
+        lum *= 1 + 0.05 * Math.min(1, Math.max(0, (py - 3) / 4));
+      } else if (ny < -0.6) lum *= 0.82;
+      colors[i * 3] = c.r * lum * r;
+      colors[i * 3 + 1] = c.g * lum * g;
+      colors[i * 3 + 2] = c.b * lum * b;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
     if (!batch.has(key))
       batch.set(key, {
         geo: [],
         mat: new THREE.MeshStandardMaterial({
-          map: texture(key),
+          map: look.map,
+          normalMap: look.normalMap,
+          normalScale: new THREE.Vector2(look.normalScale, look.normalScale),
+          roughnessMap: look.roughnessMap,
+          roughness: 1,
+          metalness: look.metalness,
           vertexColors: true,
-          roughness: 0.94,
         }),
       });
+    const made = batch.get(key)!.mat;
+    if (!made.userData.tintMask) {
+      made.userData.tintMask = true;
+      made.onBeforeCompile = tintMask;
+    }
     batch.get(key)!.geo.push(geo);
   }
   const cub = (
@@ -945,7 +968,19 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
     c: string,
     key = "plain",
     rot = 0,
-  ) => add(new THREE.BoxGeometry(w, h, d), x, y, z, c, key, rot);
+  ) => {
+    const seg = (v: number, step: number, max: number) =>
+      key === "plain" ? 1 : Math.max(1, Math.min(max, Math.ceil(v / step)));
+    add(
+      new THREE.BoxGeometry(w, h, d, seg(w, 2.5, 24), seg(h, 0.75, 10), seg(d, 2.5, 24)),
+      x,
+      y,
+      z,
+      c,
+      key,
+      rot,
+    );
+  };
   const cyl = (
     x: number,
     y: number,
@@ -1161,7 +1196,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
   for (const b of map.boxes) {
     const { x, y, z, w, h, d, mat, style } = b;
     const palette = theme.walls;
-    const tint =
+    const tint: string =
       style === "building"
         ? palette[Math.floor(rng() * palette.length)]
         : style === "floor"
@@ -1270,7 +1305,24 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
           cub(x, y + k * 0.15, z, w + 0.01, 0.08, d + 0.01, "#f2efe6");
       continue;
     }
-    cub(x, y, z, w, h, d, tint, mat);
+    cub(
+      x,
+      y,
+      z,
+      w,
+      h,
+      d,
+      tint,
+      style === "floor" && w > 40
+        ? mat + "-floor"
+        : style === "roof"
+          ? mat === "concrete"
+            ? "concrete-floor"
+            : mat === "metal" || mat === "wood"
+              ? mat
+              : "plaster"
+          : mat,
+    );
     if (style === "building") {
       cub(x, h - 0.15, z, w + 0.12, 0.24, d + 0.12, theme.cap, "stone");
       const lip = theme.lip;
@@ -1721,6 +1773,54 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
       }
     }
   }
+  const contact: number[] = [],
+    contactUv: number[] = [];
+  for (const b of map.boxes) {
+    if (b.style === "floor" || b.style === "roof" || b.h < 0.4) continue;
+    const base = b.y - b.h / 2,
+      reach = b.style === "building" ? 1.3 : b.style === "tank" ? 1 : 0.55,
+      x0 = b.x - b.w / 2,
+      x1 = b.x + b.w / 2,
+      z0 = b.z - b.d / 2,
+      z1 = b.z + b.d / 2,
+      y = base + 0.012;
+    for (const [ax, az, bx, bz, nx, nz] of [
+      [x0, z0, x1, z0, 0, -1],
+      [x1, z1, x0, z1, 0, 1],
+      [x0, z1, x0, z0, -1, 0],
+      [x1, z0, x1, z1, 1, 0],
+    ]) {
+      const quad = [
+        [ax, az, 0],
+        [bx, bz, 0],
+        [bx + nx * reach, bz + nz * reach, 1],
+        [ax + nx * reach, az + nz * reach, 1],
+      ];
+      for (const i of [0, 1, 2, 0, 2, 3]) {
+        contact.push(quad[i][0], y, quad[i][1]);
+        contactUv.push(0.5, 1 - quad[i][2]);
+      }
+    }
+  }
+  if (contact.length) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(contact, 3));
+    g.setAttribute("uv", new THREE.Float32BufferAttribute(contactUv, 2));
+    const m = new THREE.Mesh(
+      g,
+      new THREE.MeshBasicMaterial({
+        map: contactTexture(),
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      }),
+    );
+    m.renderOrder = 1;
+    scene.add(m);
+  }
   for (const { geo, mat } of batch.values()) {
     if (!geo.length) continue;
     const merged = mergeGeometries(geo, false);
@@ -1821,6 +1921,7 @@ export class GameRenderer {
   private slowTime = 0;
   private degraded = false;
   private shadowSetting = true;
+  private environment: THREE.Texture;
   constructor(
     public canvas: HTMLCanvasElement,
     public map: MapDef,
@@ -1847,7 +1948,12 @@ export class GameRenderer {
       map.id === "range" ? 0xcac0ad : theme.fog,
       map.id === "range" ? 0.0065 : theme.fogDensity,
     );
-    this.scene.add(new THREE.HemisphereLight(0xd6e4e9, 0xaa9270, 2.25));
+    this.scene.add(new THREE.HemisphereLight(0xd6e4e9, 0xaa9270, 1.95));
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    pmrem.dispose();
+    this.scene.environment = this.environment;
+    this.scene.environmentIntensity = 0.32;
     this.sun.position.set(map.width * 0.5 - 42, 65, map.depth * 0.5 - 30);
     this.sun.target.position.set(map.width * 0.5, 0, map.depth * 0.5);
     this.sun.castShadow = true;
@@ -2571,6 +2677,7 @@ export class GameRenderer {
     releaseTree(this.scene);
     releaseTree(this.hands);
     (this.scene.background as THREE.Texture)?.dispose();
+    this.environment.dispose();
     this.sun.shadow.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
