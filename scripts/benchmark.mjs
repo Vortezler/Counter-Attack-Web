@@ -14,7 +14,7 @@ try {
     viewport: { width: 1920, height: 1080 },
     deviceScaleFactor: 1,
   });
-  for (const map of ["dust2", "mirage"]) {
+  for (const map of ["sandgate", "saffron"]) {
     await page.goto(
       "http://127.0.0.1:4192/cs-web/?autostart=1&botsonly=1&map=" + map,
     );

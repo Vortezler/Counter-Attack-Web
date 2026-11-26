@@ -12,7 +12,7 @@ afterEach(() => {
   sim = undefined;
 });
 function armed(gun: "ak" | "nova") {
-  const s = (sim = new Sim(maps.dust2, "T", "normal", "Test", 178));
+  const s = (sim = new Sim(maps.sandgate, "T", "normal", "Test", 178));
   s.phase = "live";
   s.left = 100;
   // One defender stays alive (and idle, as a "remote" player) so the round does not end.

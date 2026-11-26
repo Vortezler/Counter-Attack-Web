@@ -2,7 +2,7 @@
 
 **CS Web (fan project)**
 
-A browser FPS for desktop keyboard and mouse, also packaged as an Android app with touch controls, with standalone solo play and two-player matches through Game Hub. Choose Dust2, Mirage, Nuke, Inferno or Vertigo, Competitive (friendly fire) or Casual (free armor, CT defuse kits, no friendly fire), pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
+A browser FPS for desktop keyboard and mouse, also packaged as an Android app with touch controls, with standalone solo play and two-player matches through Game Hub. Choose Sandgate, Saffron, Isotope, Terracotta or Highwire, Competitive (friendly fire) or Casual (free armor, CT defuse kits, no friendly fire), pick a side, and play a five-on-five match with nine bots. Both teams change sides after 12 rounds. The first team to 13 wins, and 12–12 ends in a draw.
 
 ## Play locally
 
@@ -48,7 +48,7 @@ A 3D stage previews the selection (drag to turn it). Bots roll their own outfits
 ## Other entry points
 
 - [Practice range](http://127.0.0.1:5177/cs-web/?scene=range&debug=1) has stationary targets, material panels, a spray wall, and buying throughout the range. Add `&side=T` for the attacking team's rifle.
-- [Watch a bot match on Mirage](http://127.0.0.1:5177/cs-web/?autostart=1&botsonly=1&map=mirage) uses the same match and physics rules.
+- [Watch a bot match on Saffron](http://127.0.0.1:5177/cs-web/?autostart=1&botsonly=1&map=saffron) uses the same match and physics rules.
 - Add `debug=1` to show navigation geometry, frame rate, recoil, and penetration feedback. Add `fly=1` for a free camera. Use Space and Ctrl to move vertically.
 - `npm run build` type-checks and produces `dist/`. Serve it at `/cs-web/`. `npm run preview` serves that build at [port 4177](http://127.0.0.1:4177/cs-web/).
 
@@ -59,8 +59,8 @@ A 3D stage previews the selection (drag to turn it). Bots roll their own outfits
 | `npm test` | Damage, penetration, utility, movement, economy, objectives, round transitions, navigation, identity, and CSP |
 | `npm run check:map` | Spawn-to-site connectivity, link clearance, route timings |
 | `npx tsx scripts/sightlines.ts` | No line of sight between the two spawn buy zones on any map (also covered by `npm test`) |
-| `node scripts/capture.mjs` | With `npm run dev` running, re-renders lobby art for Nuke, Inferno and Vertigo |
-| `npm run map:svg -- mirage` | Regenerate a map schematic under `docs/maps` |
+| `node scripts/capture.mjs` | With `npm run dev` running, re-renders lobby art for Isotope, Terracotta and Highwire |
+| `npm run map:svg -- saffron` | Regenerate a map schematic under `docs/maps` |
 | `npm run test:soak` | Deterministic ten-bot matches on both maps with objective and tick statistics |
 | `npm run build && npm run test:browser` | Match setup, buying, shooting, reloading, scoreboard, pause, repeated WebGL teardown, and phone-browser touch controls |
 | `npm run test:android` | With the debug app open on an emulator or phone, 33 multi-touch checks of the Android build |
@@ -102,7 +102,7 @@ Set the repository's Pages source to **GitHub Actions**. The **Deploy GitHub Pag
 
 ## Game Hub multiplayer
 
-Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, and wait for the creator to start it. Both players then select **Open match**. The creator plays CT and runs the simulation, and the guest plays T. Eight bots fill the remaining slots on Dust2 with normal difficulty. The existing solo menu includes both maps and difficulty settings.
+Open Counter-Attack Web lobbies from Game Hub, create or join a two-seat room, and wait for the creator to start it. Both players then select **Open match**. The creator plays CT and runs the simulation, and the guest plays T. Eight bots fill the remaining slots on Sandgate with normal difficulty. The existing solo menu includes both maps and difficulty settings.
 
 The match opens inside the Game Hub tab. Browsers share connection candidates while establishing direct WebRTC and use private Game Hub Realtime messages if a direct path is unavailable. On the relay, the guest sees local movement immediately and adjusts to the host's snapshots. The host resolves damage, purchases, and round outcomes over either connection. The guest can reopen an active match and resume from the host’s state. Relaunching the host game starts a fresh match. Leave the lobby to end it for both players.
 

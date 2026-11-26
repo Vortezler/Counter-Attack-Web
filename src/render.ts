@@ -1169,7 +1169,7 @@ interface Theme {
   trees: "palm" | "cypress" | "none";
 }
 const themes: Record<string, Theme> = {
-  dust2: {
+  sandgate: {
     seed: 418,
     walls: ["#e9c89d", "#e1bf93", "#e4ceb0", "#d7b48a", "#d1b18d", "#ddc9a8"],
     floor: "#d3bd96",
@@ -1189,7 +1189,7 @@ const themes: Record<string, Theme> = {
     accent: "#81958c",
     trees: "palm",
   },
-  mirage: {
+  saffron: {
     seed: 673,
     walls: ["#d8b5a1", "#e0c7ad", "#a6bac0", "#dbc0a9", "#b3bfb9", "#d7ae96"],
     floor: "#c9baa4",
@@ -1209,7 +1209,7 @@ const themes: Record<string, Theme> = {
     accent: "#869b9e",
     trees: "palm",
   },
-  inferno: {
+  terracotta: {
     seed: 911,
     walls: ["#dcae84", "#e4bd94", "#cf9a70", "#e8cba6", "#d6a47c", "#d2b291"],
     floor: "#b8a289",
@@ -1229,7 +1229,7 @@ const themes: Record<string, Theme> = {
     accent: "#a35a3c",
     trees: "cypress",
   },
-  nuke: {
+  isotope: {
     seed: 301,
     walls: ["#d9dcd8", "#c7ccc9", "#b9c3c6", "#d2d0c6", "#aeb9b5", "#e0e0da"],
     floor: "#9f9d95",
@@ -1249,7 +1249,7 @@ const themes: Record<string, Theme> = {
     accent: "#9aa3a6",
     trees: "none",
   },
-  vertigo: {
+  highwire: {
     seed: 517,
     walls: ["#c9c8c2", "#b8b7b0", "#d4d2ca", "#a9aaa6", "#c2c5c4", "#dad7cd"],
     floor: "#aaa8a0",
@@ -1330,7 +1330,7 @@ const themes: Record<string, Theme> = {
     trees: "none",
   },
 };
-const themeOf = (id: string) => themes[id] ?? themes.dust2;
+const themeOf = (id: string) => themes[id] ?? themes.sandgate;
 const axes = new THREE.Vector3(0, 1, 0);
 /** Smooth 3D value noise in 0..1 for large-scale colour variation across the world. */
 function worldNoise(x: number, y: number, z: number) {

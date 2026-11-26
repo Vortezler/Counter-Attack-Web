@@ -25,7 +25,7 @@ afterEach(() => {
   sim = undefined;
 });
 function fixture() {
-  const s = (sim = new Sim(maps.dust2, "T", "normal", "Test", 178));
+  const s = (sim = new Sim(maps.sandgate, "T", "normal", "Test", 178));
   s.phase = "live";
   s.left = 100;
   return s;

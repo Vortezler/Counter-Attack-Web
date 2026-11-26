@@ -6,9 +6,9 @@ test("selects a map and side, buys gear, moves, fires, pauses, and returns to se
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("./");
-  await page.getByRole("button", { name: "Mirage", exact: true }).click();
+  await page.getByRole("button", { name: "Saffron", exact: true }).click();
   await page.locator("[data-side=T]").click();
-  await expect(page.locator(".csw-feature h2")).toHaveText("MIRAGE");
+  await expect(page.locator(".csw-feature h2")).toHaveText("SAFFRON");
   await expect
     .poll(() =>
       page
@@ -136,7 +136,7 @@ test("releases pointer lock, RAF, event listeners, audio and WebGL across three 
       for (let i = 0; i < 3; i++) {
         const h = await createGame(host, {
           autostart: true,
-          map: i % 2 ? "mirage" : "dust2",
+          map: i % 2 ? "saffron" : "sandgate",
           debug: i === 1,
           onExit: () => {},
         });

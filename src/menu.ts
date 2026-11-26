@@ -8,11 +8,11 @@ import { mountLoadout } from "./loadoutMenu";
 
 export type LobbyMap = GridMapId;
 export const lobbyMaps: LobbyMap[] = [
-  "dust2",
-  "mirage",
-  "nuke",
-  "inferno",
-  "vertigo",
+  "sandgate",
+  "saffron",
+  "isotope",
+  "terracotta",
+  "highwire",
   "switchyard",
   "canopy",
   "foundry",
@@ -120,33 +120,33 @@ const logo =
   '<svg class="csw-mark" viewBox="0 0 52 48" aria-hidden="true"><g fill="currentColor"><path d="M16 5h14L11 42H0z"/><path d="M34 5h12L34.8 26h-12z"/><path d="M29 30h12l-6.3 12H22.6z"/></g></svg>';
 
 const mapInfo = {
-  dust2: {
-    name: "Dust2",
-    display: "DUST2",
+  sandgate: {
+    name: "Sandgate",
+    display: "SANDGATE",
     region: "Desert",
     copy: "Long sightlines, narrow tunnels, and a sunbaked courtyard.",
   },
-  mirage: {
-    name: "Mirage",
-    display: "MIRAGE",
+  saffron: {
+    name: "Saffron",
+    display: "SAFFRON",
     region: "Kasbah",
     copy: "Fight for mid control between palace balconies and market arches.",
   },
-  nuke: {
-    name: "Nuke",
-    display: "NUKE",
+  isotope: {
+    name: "Isotope",
+    display: "ISOTOPE",
     region: "Reactor",
     copy: "Indoor sites under a concrete roof, a silo yard outside, and Ramp linking it all.",
   },
-  inferno: {
-    name: "Inferno",
-    display: "INFERNO",
+  terracotta: {
+    name: "Terracotta",
+    display: "TERRACOTTA",
     region: "Village",
     copy: "Hold the winding Banana lane or storm the apartments over the A balcony.",
   },
-  vertigo: {
-    name: "Vertigo",
-    display: "VERTIGO",
+  highwire: {
+    name: "Highwire",
+    display: "HIGHWIRE",
     region: "Skyline",
     copy: "Fifty floors up: a ramp over scaffolding to A and a stairwell into B.",
   },
@@ -214,7 +214,7 @@ export function mergeSettings(
   };
 }
 const art = (map: LobbyMap, thumb = false) =>
-  `${import.meta.env.BASE_URL}art/${map}${thumb ? "-map" : ""}.${map === "dust2" || map === "mirage" ? "webp" : "jpg"}`;
+  `${import.meta.env.BASE_URL}art/${map}${thumb ? "-map" : ""}.${map === "sandgate" || map === "saffron" ? "webp" : "jpg"}`;
 /** The Controls dialog on phones: where the invisible touch controls are. */
 const touchGuide = `<dl class="csw-touchguide">
   <div><dt>Move</dt><dd>Put your left thumb down anywhere on the left side and drag. A light push walks quietly.</dd></div>
@@ -230,7 +230,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
   const controller = new AbortController();
   const { signal } = controller;
   const choice: MenuChoice = {
-    map: options.map || "dust2",
+    map: options.map || "sandgate",
     side: options.side || "CT",
     difficulty: options.difficulty || "normal",
     mode: options.mode || "competitive",

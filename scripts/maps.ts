@@ -100,7 +100,7 @@ function check(m: MapDef) {
     }
   const all: Partial<Record<GridMapId, [string, string[], number, number][]>> =
     {
-      dust2: [
+      sandgate: [
         [
           "T to A via Long",
           ["T Spawn", "Long Doors", "Long A", "A Site"],
@@ -117,25 +117,25 @@ function check(m: MapDef) {
         ["CT to A", ["CT Spawn", "A Site"], 6, 7],
         ["CT to B", ["CT Spawn", "B Site"], 5, 7],
       ],
-      mirage: [
+      saffron: [
         ["T to A via Palace", ["T Spawn", "Palace", "A Site"], 11, 13],
         ["T to B via Apartments", ["T Spawn", "Apartments", "B Site"], 12, 14],
         ["CT to A", ["CT Spawn", "A Site"], 6, 8],
       ],
-      nuke: [
+      isotope: [
         ["T to A via Lobby", ["T Spawn", "Lobby", "A Site"], 10, 13],
         ["T to B via Ramp", ["T Spawn", "Lobby", "Ramp", "B Site"], 14, 18],
         ["T to B via Secret", ["T Spawn", "Yard", "Secret", "B Site"], 12, 16],
         ["CT to A", ["CT Spawn", "A Site"], 4, 7],
         ["CT to B", ["CT Spawn", "B Site"], 4, 7],
       ],
-      inferno: [
+      terracotta: [
         ["T to B via Banana", ["T Spawn", "Banana", "B Site"], 12, 16],
         ["T to A via Apartments", ["T Spawn", "Apartments", "A Site"], 11, 15],
         ["CT to A", ["CT Spawn", "A Site"], 4, 7],
         ["CT to B", ["CT Spawn", "B Site"], 5, 8],
       ],
-      vertigo: [
+      highwire: [
         ["T to A via Ramp", ["T Spawn", "A Ramp", "A Site"], 11, 15],
         ["T to B via Stairs", ["T Spawn", "B Stairs", "B Site"], 10, 14],
         ["CT to A", ["CT Spawn", "A Site"], 4, 7],

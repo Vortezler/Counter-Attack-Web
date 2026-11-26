@@ -9,8 +9,8 @@ import { maps } from "../src/world";
 beforeAll(initPhysics);
 
 it("replicates the host's guest purchase and final result into the guest view", () => {
-  const host = new Sim(maps.dust2);
-  const guest = new Sim(maps.dust2);
+  const host = new Sim(maps.sandgate);
+  const guest = new Sim(maps.sandgate);
   host.remotePlayer = peerPlayer;
   guest.viewer = peerPlayer;
   try {
@@ -44,8 +44,8 @@ it("accepts bounded peer input without accepting a player ID or unauthorized loa
 });
 
 it("predicts guest movement before the relay responds, then corrects to the host", () => {
-  const host = new Sim(maps.dust2);
-  const guest = new Sim(maps.dust2);
+  const host = new Sim(maps.sandgate);
+  const guest = new Sim(maps.sandgate);
   const motion = new GuestMotion();
   host.remotePlayer = peerPlayer;
   guest.viewer = peerPlayer;
@@ -76,8 +76,8 @@ it("predicts guest movement before the relay responds, then corrects to the host
 });
 
 it("shows the host's smokes, fires and grenade counts to the guest", () => {
-  const host = new Sim(maps.dust2);
-  const guest = new Sim(maps.dust2);
+  const host = new Sim(maps.sandgate);
+  const guest = new Sim(maps.sandgate);
   host.remotePlayer = peerPlayer;
   guest.viewer = peerPlayer;
   try {

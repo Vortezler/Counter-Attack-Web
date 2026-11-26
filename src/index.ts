@@ -77,7 +77,7 @@ export async function createGame(
     signal = lifetime.signal;
   const audio = new GameAudio((a, b) => (sim ? sim.occlusion(a, b) : 0));
   let choice: MenuChoice = {
-    map: opts.map ?? "dust2",
+    map: opts.map ?? "sandgate",
     side: opts.side ?? "CT",
     difficulty: opts.difficulty ?? "normal",
     mode: opts.mode ?? "competitive",

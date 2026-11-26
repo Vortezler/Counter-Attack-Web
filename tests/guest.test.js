@@ -146,14 +146,14 @@ test("room links clean both aliases without losing the map or static entry path"
   const uuid = "ea3c9575-1563-4a71-913e-89bbbffab7d5";
   vi.stubGlobal("window", {
     location: {
-      href: path + "?room=invalid&map=mirage&lobby=" + uuid + "#info",
+      href: path + "?room=invalid&map=saffron&lobby=" + uuid + "#info",
     },
   });
   assert.match(consumeRoomRequest(), /Shared rooms/);
   assert.deepEqual(replaceState.mock.lastCall, [
     null,
     "",
-    "/cs-web/?map=mirage#info",
+    "/cs-web/?map=saffron#info",
   ]);
   window.location.href = path + "?room=wrong";
   assert.match(consumeRoomRequest(), /invalid/);

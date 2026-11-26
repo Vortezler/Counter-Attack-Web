@@ -1,20 +1,20 @@
 export type Team = "CT" | "T";
 export type GridMapId =
-  | "dust2"
-  | "mirage"
-  | "nuke"
-  | "inferno"
-  | "vertigo"
+  | "sandgate"
+  | "saffron"
+  | "isotope"
+  | "terracotta"
+  | "highwire"
   | "switchyard"
   | "canopy"
   | "foundry";
 export type MapId = GridMapId | "range";
 export const mapIds: GridMapId[] = [
-  "dust2",
-  "mirage",
-  "nuke",
-  "inferno",
-  "vertigo",
+  "sandgate",
+  "saffron",
+  "isotope",
+  "terracotta",
+  "highwire",
   "switchyard",
   "canopy",
   "foundry",
@@ -431,9 +431,9 @@ function gridMap(spec: GridSpec): MapDef {
   };
 }
 
-const dust2: GridSpec = {
-  id: "dust2",
-  name: "Dust2",
+const sandgate: GridSpec = {
+  id: "sandgate",
+  name: "Sandgate",
   t: [10, 18],
   ct: [10, 3],
   a: [17, 4],
@@ -532,9 +532,9 @@ const dust2: GridSpec = {
   },
 };
 
-const mirage: GridSpec = {
-  id: "mirage",
-  name: "Mirage",
+const saffron: GridSpec = {
+  id: "saffron",
+  name: "Saffron",
   t: [10, 18],
   ct: [9, 3],
   a: [16, 5],
@@ -615,9 +615,9 @@ const mirage: GridSpec = {
 };
 
 /** Industrial plant: indoor sites under a concrete roof, an open yard of silos, and long service corridors. */
-const nuke: GridSpec = {
-  id: "nuke",
-  name: "Nuke",
+const isotope: GridSpec = {
+  id: "isotope",
+  name: "Isotope",
   t: [10, 18],
   ct: [10, 2],
   a: [15, 6],
@@ -717,9 +717,9 @@ const nuke: GridSpec = {
 };
 
 /** Terracotta village: a winding Banana lane to the fountain site and apartments over the A balcony. */
-const inferno: GridSpec = {
-  id: "inferno",
-  name: "Inferno",
+const terracotta: GridSpec = {
+  id: "terracotta",
+  name: "Terracotta",
   t: [10, 18],
   ct: [10, 2],
   a: [16, 5],
@@ -800,9 +800,9 @@ const inferno: GridSpec = {
 };
 
 /** Skyscraper under construction: concrete decks, scaffolding, and a long ramp up to A. */
-const vertigo: GridSpec = {
-  id: "vertigo",
-  name: "Vertigo",
+const highwire: GridSpec = {
+  id: "highwire",
+  name: "Highwire",
   t: [10, 18],
   ct: [10, 2],
   a: [16, 6],
@@ -1344,11 +1344,11 @@ function firingRange(): MapDef {
   };
 }
 export const maps: Record<MapId, MapDef> = {
-  dust2: gridMap(dust2),
-  mirage: gridMap(mirage),
-  nuke: gridMap(nuke),
-  inferno: gridMap(inferno),
-  vertigo: gridMap(vertigo),
+  sandgate: gridMap(sandgate),
+  saffron: gridMap(saffron),
+  isotope: gridMap(isotope),
+  terracotta: gridMap(terracotta),
+  highwire: gridMap(highwire),
   switchyard: gridMap(switchyard),
   canopy: gridMap(canopy),
   foundry: gridMap(foundry),

@@ -54,4 +54,4 @@ A shared mode would need a reviewed database catalog entry, private room adapter
 
 ## Captured screens
 
-[Hub catalog](screenshots/hub-card.png) · [Match lobby](screenshots/game-menu.png) · [Mirage buy menu](screenshots/buy-menu.png) · [Verified range hit through cover](screenshots/range-wallbang.png) · [Return to the hub](screenshots/hub-return.png)
+[Hub catalog](screenshots/hub-card.png) · [Match lobby](screenshots/game-menu.png) · [Saffron buy menu](screenshots/buy-menu.png) · [Verified range hit through cover](screenshots/range-wallbang.png) · [Return to the hub](screenshots/hub-return.png)

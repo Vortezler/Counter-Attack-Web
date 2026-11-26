@@ -269,9 +269,9 @@ index 0000000..d4fba3b
 +    await expect(page).toHaveURL(/\/game-hub\/$/);
 +  });
 +
-+  test('a player opens the Mirage armory and buys a defuse kit', async ({ page }) => {
++  test('a player opens the Saffron armory and buys a defuse kit', async ({ page }) => {
 +    test.setTimeout(60000);
-+    await page.goto('/cs-web/?autostart=1&map=mirage&side=CT');
++    await page.goto('/cs-web/?autostart=1&map=saffron&side=CT');
 +    await expect(page.locator('[data-phase="freeze"]')).toBeVisible({timeout: 45000});
 +    await page.locator('canvas[aria-label="First-person game view"]').focus();
 +    await page.keyboard.press('b');

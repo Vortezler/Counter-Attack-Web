@@ -78,7 +78,7 @@ describe("Economy and navigation", () => {
     ]);
     expect(capMoney(16500)).toBe(16000);
   });
-  it.each(["dust2", "mirage"] as const)(
+  it.each(["sandgate", "saffron"] as const)(
     "%s spawns route to either site",
     (id) => {
       const m = maps[id];

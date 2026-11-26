@@ -10,7 +10,7 @@ afterEach(() => {
   sim = undefined;
 });
 const make = (mode: GameMode) =>
-  (sim = new Sim(maps.dust2, "T", "normal", "Test", 178, false, mode));
+  (sim = new Sim(maps.sandgate, "T", "normal", "Test", 178, false, mode));
 function place(s: Sim, id: number, where: { x: number; y: number; z: number }) {
   const p = s.players[id];
   Object.assign(p, where);

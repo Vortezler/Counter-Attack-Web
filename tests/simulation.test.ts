@@ -8,7 +8,7 @@ beforeAll(initPhysics);
 let sim: Sim | undefined;
 afterEach(() => sim?.dispose());
 function fixture() {
-  return (sim = new Sim(maps.dust2, "T", "normal", "Test", 178));
+  return (sim = new Sim(maps.sandgate, "T", "normal", "Test", 178));
 }
 function step(s: Sim, n = 1) {
   for (let i = 0; i < n; i++)

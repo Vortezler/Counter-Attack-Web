@@ -12,7 +12,7 @@ afterEach(() => {
   sim?.dispose();
   sim = undefined;
 });
-function fixture(map = maps.dust2) {
+function fixture(map = maps.sandgate) {
   return (sim = new Sim(map, "T", "normal", "Test", 178));
 }
 function step(s: Sim, n = 1) {
@@ -97,7 +97,7 @@ describe("weapons", () => {
     expect(Math.hypot(e.normal!.x, e.normal!.y, e.normal!.z)).toBeCloseTo(1, 3);
   });
   it("cycles scope levels: two on the SSG, one on the AUG", () => {
-    const s = (sim = new Sim(maps.dust2, "CT", "normal", "Test", 9)),
+    const s = (sim = new Sim(maps.sandgate, "CT", "normal", "Test", 9)),
       p = s.me;
     s.phase = "freeze";
     p.money = 16000;

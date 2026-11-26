@@ -68,7 +68,7 @@ async function openSolo() {
     notice,
     map: (lobbyMaps as string[]).includes(q.get("map") ?? "")
       ? (q.get("map") as LobbyMap)
-      : "dust2",
+      : "sandgate",
     side: q.get("side") === "T" ? "T" : "CT",
     mode: (lobbyModes as string[]).includes(q.get("mode") ?? "")
       ? (q.get("mode") as LobbyMode)

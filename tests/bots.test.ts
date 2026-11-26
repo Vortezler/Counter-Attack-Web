@@ -17,7 +17,7 @@ function place(s: Sim, id: number, where: { x: number; y: number; z: number }) {
 }
 /** Player 0 (idle human) and bot 5 alone on open ground at the T spawn, `gap` metres apart. */
 function duel(gap: number) {
-  const s = (sim = new Sim(maps.dust2, "T", "normal", "Test", 178));
+  const s = (sim = new Sim(maps.sandgate, "T", "normal", "Test", 178));
   s.phase = "live";
   s.left = 100;
   const spawn = s.map.spawns.T[0];
@@ -33,7 +33,7 @@ const human = (s: Sim, n: number) => {
 };
 
 it("bots heading for the same place take different routes", () => {
-  const map = maps.dust2,
+  const map = maps.sandgate,
     from = nearest(map.nodes, map.spawns.T[0].x, map.spawns.T[0].z),
     to = nearest(map.nodes, map.sites.A.x, map.sites.A.z),
     routes = new Set([1, 2, 3, 4, 5].map((id) => path(map.nodes, from, to, id * 7919 + 104729 + 1).join()));

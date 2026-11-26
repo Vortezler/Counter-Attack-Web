@@ -67,15 +67,15 @@ async function frame(map, eye, look, extra = {}) {
 const out = (name) =>
   fileURLToPath(new URL("../public/art/" + name, import.meta.url));
 const views = {
-  nuke: [
+  isotope: [
     { x: 46, y: 17, z: 90 },
     { x: 22, y: 1, z: 62 },
   ],
-  inferno: [
+  terracotta: [
     { x: 46, y: 16, z: 56 },
     { x: 21, y: 0, z: 26 },
   ],
-  vertigo: [
+  highwire: [
     { x: 92, y: 10, z: 90 },
     { x: 70, y: 1, z: 32 },
   ],
@@ -121,7 +121,7 @@ if (only.length) {
   await browser.close();
   process.exit(0);
 }
-// Effects proof: a T-spawn courtyard on Dust2 with a smoke, a molotov and three bodies.
+// Effects proof: a T-spawn courtyard on Sandgate with a smoke, a molotov and three bodies.
 const spawn = { x: 52.5, z: 92.5 };
 const actor = (id, x, z, team, alive, yaw = 0) => ({
   id,
@@ -134,7 +134,7 @@ const actor = (id, x, z, team, alive, yaw = 0) => ({
   last: { x, y: 0, z },
 });
 await frame(
-  "dust2",
+  "sandgate",
   { x: spawn.x - 3, y: 1.7, z: spawn.z + 5 },
   { x: spawn.x + 1, y: 0.6, z: spawn.z - 6 },
   {
