@@ -255,15 +255,15 @@
 <circle cx="327" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="357" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="387" cy="597" r="1.5" fill="#a3b5a8"/>
-<text x="507" y="502" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">A Ramp</text>
-<text x="177" y="502" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Stairs</text>
+<text x="507" y="502" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Girder Ramp</text>
+<text x="177" y="502" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Stairwell</text>
 <text x="357" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Mid</text>
-<text x="447" y="412" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Elevators</text>
-<text x="417" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">A Short</text>
-<text x="237" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Side Halls</text>
-<text x="117" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Tunnel</text>
+<text x="447" y="412" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Lift Shaft</text>
+<text x="417" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Plank</text>
+<text x="237" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Drywall</text>
+<text x="117" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Conduit</text>
 <text x="327" y="202" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">CT Mid</text>
-<text x="537" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Headshot</text>
+<text x="537" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Crane</text>
 <text x="507" y="202" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">A Site</text>
 <text x="147" y="202" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Site</text>
 <text x="327" y="562" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">T Spawn</text>

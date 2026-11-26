@@ -17,7 +17,7 @@
 
 - Open the practice range with `?scene=range&debug=1`. Buy a weapon with **B**, then compare standing, running, crouched, and repeated shots. The debug display shows the recoil pattern, current material and remaining damage. A yellow hit marker and text identify a hit through cover.
 - `npm test` exercises the same Rapier simulation used by the game. Tests cover bullets traversing one, four, and five thin panels, blocking on concrete, armor and hit groups, grenade release and bounce, flash facing, crouch/jump, buying, and interrupted or completed round objectives.
-- `npm run check:map` checks both graphs, including capsule-width clearance and authoring timing windows. Sandgate has 202 connected nodes and Saffron has 191. Measured route lengths, converted at 250 units per second, put Sandgate Long at 16.7 seconds and Saffron Palace at 15.4 seconds. Both are within the plan’s tolerance.
+- `npm run check:map` checks both graphs, including capsule-width clearance and authoring timing windows. Sandgate has 202 connected nodes and Saffron has 191. Measured route lengths, converted at 250 units per second, put Sandgate's Caravan Road route at 16.7 seconds and Saffron's Riad route at 15.4 seconds. Both are within the plan’s tolerance.
 - `npm run test:soak` runs two seeds per map with all ten players controlled by bots. Each match ends under standard first-to-13 or draw rules. The reported mean includes all simulated ticks. Browser rendering is measured separately.
 - `npm run build` followed by `npm run check:performance` samples live matches in Edge or Chromium at 1920 × 1080. Each sample begins after freeze time and lasts 6.5 seconds. The benchmark prints the graphics adapter, actual framebuffer dimensions and frame timings.
 

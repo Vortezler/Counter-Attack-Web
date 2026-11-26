@@ -277,17 +277,17 @@
 <circle cx="327" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="357" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="387" cy="597" r="1.5" fill="#a3b5a8"/>
-<text x="597" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Palace</text>
-<text x="507" y="382" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">T Ramp</text>
-<text x="447" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Ticket</text>
-<text x="417" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Jungle</text>
-<text x="417" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Connector</text>
-<text x="297" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Window</text>
+<text x="597" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Riad</text>
+<text x="507" y="382" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Spice Ramp</text>
+<text x="447" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Kiosk</text>
+<text x="417" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Palm Court</text>
+<text x="417" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Cloister</text>
+<text x="297" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Shutters</text>
 <text x="327" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Mid</text>
-<text x="237" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Underpass</text>
-<text x="147" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Apartments</text>
-<text x="237" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Market</text>
-<text x="237" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Short</text>
+<text x="237" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Undercroft</text>
+<text x="147" y="352" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Lofts</text>
+<text x="237" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Bazaar</text>
+<text x="237" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Alley</text>
 <text x="507" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">A Site</text>
 <text x="147" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Site</text>
 <text x="327" y="562" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">T Spawn</text>

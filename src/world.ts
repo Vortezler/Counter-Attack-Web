@@ -515,20 +515,20 @@ const sandgate: GridSpec = {
     );
   },
   callouts: [
-    ["Long A", [19, 10]],
-    ["Long Doors", [17, 15]],
-    ["Pit", [18, 7]],
-    ["Short A", [13, 9]],
-    ["Mid Doors", [11, 8]],
-    ["Top Mid", [10, 14]],
-    ["Upper Tunnels", [4, 10]],
-    ["Lower Tunnels", [2, 14]],
-    ["B Window", [7, 8]],
-    ["B Doors", [7, 5]],
+    ["Caravan Road", [19, 10]],
+    ["Gatehouse", [17, 15]],
+    ["Cistern", [18, 7]],
+    ["Rampart", [13, 9]],
+    ["Mid Arch", [11, 8]],
+    ["Souk", [10, 14]],
+    ["Cellar Stairs", [4, 10]],
+    ["Cellars", [2, 14]],
+    ["Lattice", [7, 8]],
+    ["B Gate", [7, 5]],
   ],
   staging: {
-    A: ["Long Doors", "Short A", "Long Doors"],
-    B: ["Upper Tunnels"],
+    A: ["Gatehouse", "Rampart", "Gatehouse"],
+    B: ["Cellar Stairs"],
   },
 };
 
@@ -559,7 +559,7 @@ const saffron: GridSpec = {
     k.road([12, 17], [14, 17], [14, 16]);
     k.room(14, 15, 18, 16);
     k.room(16, 13, 18, 14);
-    // Mid ends at Window instead of running into CT spawn; CTs reach it through B Short.
+    // Mid ends at Shutters instead of running into CT spawn; CTs reach it through the Alley.
     k.road(t, [10, 15], [9, 15], [9, 12], [10, 12], [10, 7]);
     k.room(9, 6, 10, 7);
     k.room(9, 9, 11, 12);
@@ -599,19 +599,19 @@ const saffron: GridSpec = {
     k.prop(4, 4, -1.35, -1.65, 1.55, 1.9, 2.2, "metal", "container");
   },
   callouts: [
-    ["Palace", [19, 10]],
-    ["T Ramp", [16, 12]],
-    ["Ticket", [14, 5]],
-    ["Jungle", [13, 7]],
-    ["Connector", [13, 10]],
-    ["Window", [9, 7]],
+    ["Riad", [19, 10]],
+    ["Spice Ramp", [16, 12]],
+    ["Kiosk", [14, 5]],
+    ["Palm Court", [13, 7]],
+    ["Cloister", [13, 10]],
+    ["Shutters", [9, 7]],
     ["Mid", [10, 11]],
-    ["Underpass", [7, 14]],
-    ["Apartments", [4, 11]],
-    ["Market", [7, 5]],
-    ["B Short", [7, 9]],
+    ["Undercroft", [7, 14]],
+    ["Lofts", [4, 11]],
+    ["Bazaar", [7, 5]],
+    ["Alley", [7, 9]],
   ],
-  staging: { A: ["Palace", "Connector", "Palace"], B: ["Apartments"] },
+  staging: { A: ["Riad", "Cloister", "Riad"], B: ["Lofts"] },
 };
 
 /** Industrial plant: indoor sites under a concrete roof, an open yard of silos, and long service corridors. */
@@ -629,19 +629,19 @@ const isotope: GridSpec = {
   trim: "metal",
   height: [5.2, 4.2],
   layout(k) {
-    // Outside: T spawn west into the silo yard, then Secret up the west wall to B.
+    // Perimeter: T spawn west into the tank farm, then the Spillway up the west wall to B.
     k.road([10, 18], [6, 18], [6, 15]);
     k.room(2, 11, 7, 15);
     k.road([2, 11], [2, 6]);
-    // Lobby: east exit, then Squeaky and Hut up into the indoor A site.
+    // Turbine Hall: east exit, then Airlock and Booth up into the indoor A site.
     k.road([12, 18], [13, 18], [13, 16], [15, 16], [15, 13]);
     k.room(14, 11, 17, 13);
     k.road([14, 11], [14, 9]);
     k.road([17, 11], [17, 9]);
-    // Ramp room links Lobby to lower B; Garage joins it from the yard.
+    // Decon links Turbine Hall to lower B; the Motor Pool joins it from the tank farm.
     k.road([14, 12], [11, 12], [11, 9], [8, 9], [8, 7]);
     k.road([7, 12], [10, 12]);
-    // CT side: A Main, B Main and the Vents crawl that drops into Ramp.
+    // CT side: A Main, B Main and the Ducts crawl that drops into Decon.
     k.road([12, 2], [14, 2], [14, 3]);
     k.road([8, 2], [5, 2], [5, 3]);
     k.road([10, 4], [10, 6], [11, 6], [11, 8]);
@@ -701,22 +701,22 @@ const isotope: GridSpec = {
     k.doors(17, 10);
   },
   callouts: [
-    ["Yard", [4, 12]],
-    ["Secret", [2, 8]],
-    ["Garage", [8, 12]],
-    ["Lobby", [15, 12]],
-    ["Squeaky", [14, 9]],
-    ["Hut", [17, 10]],
-    ["Ramp", [9, 9]],
-    ["Vents", [10, 5]],
+    ["Tank Farm", [4, 12]],
+    ["Spillway", [2, 8]],
+    ["Motor Pool", [8, 12]],
+    ["Turbine Hall", [15, 12]],
+    ["Airlock", [14, 9]],
+    ["Booth", [17, 10]],
+    ["Decon", [9, 9]],
+    ["Ducts", [10, 5]],
     ["B Main", [5, 2]],
     ["A Main", [14, 2]],
-    ["Outside", [6, 16]],
+    ["Perimeter", [6, 16]],
   ],
-  staging: { A: ["Lobby", "Hut", "Squeaky"], B: ["Ramp", "Secret"] },
+  staging: { A: ["Turbine Hall", "Booth", "Airlock"], B: ["Decon", "Spillway"] },
 };
 
-/** Terracotta village: a winding Banana lane to the fountain site and apartments over the A balcony. */
+/** Terracotta village: a winding Vine Lane to the fountain site and tenements over the A terrace. */
 const terracotta: GridSpec = {
   id: "terracotta",
   name: "Terracotta",
@@ -731,7 +731,7 @@ const terracotta: GridSpec = {
   trim: "stone",
   height: [4.8, 4.4],
   layout(k) {
-    // Banana snakes up the west side into B.
+    // Vine Lane snakes up the west side into B.
     k.road(
       [8, 18],
       [6, 18],
@@ -743,9 +743,9 @@ const terracotta: GridSpec = {
       [4, 10],
       [4, 8],
     );
-    // Apartments climb the east side and spill onto A from the balcony.
+    // Tenements climb the east side and spill onto A from the terrace.
     k.road([12, 18], [15, 18], [15, 15], [17, 15], [17, 12], [18, 12], [18, 8]);
-    // Mid runs from the T stairs to the Arch; Short splits off to A.
+    // Mid runs from the T stairs to the Aqueduct; Bakery splits off to A.
     k.road([13, 18], [13, 13], [11, 13], [11, 10]);
     k.room(10, 9, 12, 11);
     k.road([12, 10], [14, 10], [14, 8]);
@@ -784,19 +784,19 @@ const terracotta: GridSpec = {
     k.doors(11, 4);
   },
   callouts: [
-    ["Banana", [3, 12]],
-    ["Car", [4, 15]],
-    ["T Ramp", [6, 17]],
-    ["Apartments", [16, 15]],
-    ["Balcony", [18, 10]],
+    ["Vine Lane", [3, 12]],
+    ["Cart", [4, 15]],
+    ["Kiln Steps", [6, 17]],
+    ["Tenements", [16, 15]],
+    ["Terrace", [18, 10]],
     ["Mid", [11, 10]],
-    ["Short", [14, 9]],
-    ["Arch", [10, 7]],
-    ["Second Mid", [8, 11]],
-    ["Library", [15, 2]],
-    ["Construction", [6, 2]],
+    ["Bakery", [14, 9]],
+    ["Aqueduct", [10, 7]],
+    ["Laundry", [8, 11]],
+    ["Belltower", [15, 2]],
+    ["Pottery", [6, 2]],
   ],
-  staging: { A: ["Apartments", "Short", "Balcony"], B: ["Banana"] },
+  staging: { A: ["Tenements", "Bakery", "Terrace"], B: ["Vine Lane"] },
 };
 
 /** Skyscraper under construction: concrete decks, scaffolding, and a long ramp up to A. */
@@ -814,11 +814,11 @@ const highwire: GridSpec = {
   trim: "metal",
   height: [4.7, 2.6],
   layout(k) {
-    // A Ramp climbs over a hump, then jogs onto the raised A deck.
+    // Girder Ramp climbs over a hump, then jogs onto the raised A deck.
     k.road([12, 18], [16, 18], [16, 14], [17, 14], [17, 9]);
-    // B Stairs go up a second hump and enter B from the south.
+    // The Stairwell goes up a second hump and enters B from the south.
     k.road([8, 18], [5, 18], [5, 14], [3, 14], [3, 9]);
-    // Mid, Elevators and the two short connectors.
+    // Mid, Lift Shaft and the two short connectors.
     k.road([5, 14], [8, 14], [8, 11], [11, 11], [11, 10]);
     k.room(10, 8, 12, 10);
     k.road([12, 9], [13, 9], [13, 7]);
@@ -861,17 +861,17 @@ const highwire: GridSpec = {
     k.prop(16, 11, -1.4, 0, 1.4, 1, 2.6, "concrete", "barrier");
   },
   callouts: [
-    ["A Ramp", [16, 16]],
-    ["B Stairs", [5, 16]],
+    ["Girder Ramp", [16, 16]],
+    ["Stairwell", [5, 16]],
     ["Mid", [11, 9]],
-    ["Elevators", [14, 13]],
-    ["A Short", [13, 8]],
-    ["Side Halls", [7, 9]],
-    ["Tunnel", [3, 11]],
+    ["Lift Shaft", [14, 13]],
+    ["Plank", [13, 8]],
+    ["Drywall", [7, 9]],
+    ["Conduit", [3, 11]],
     ["CT Mid", [10, 6]],
-    ["Headshot", [17, 11]],
+    ["Crane", [17, 11]],
   ],
-  staging: { A: ["A Ramp", "Elevators", "A Ramp"], B: ["B Stairs"] },
+  staging: { A: ["Girder Ramp", "Lift Shaft", "Girder Ramp"], B: ["Stairwell"] },
 };
 
 /**

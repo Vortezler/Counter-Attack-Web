@@ -2097,7 +2097,10 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
         spawn,
         ...map.callouts.filter(
           (c) =>
-            c.name === "Long A" || c.name === "Mid" || c.name === "Apartments",
+            c.name === "Caravan Road" ||
+            c.name === "Mid" ||
+            c.name === "Lofts" ||
+            c.name === "Tenements",
         ),
       ]) {
         const nearby = map.boxes.filter(

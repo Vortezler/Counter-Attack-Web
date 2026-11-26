@@ -299,16 +299,16 @@
 <circle cx="327" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="357" cy="597" r="1.5" fill="#a3b5a8"/>
 <circle cx="387" cy="597" r="1.5" fill="#a3b5a8"/>
-<text x="597" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Long A</text>
-<text x="537" y="472" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Long Doors</text>
-<text x="567" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Pit</text>
-<text x="417" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Short A</text>
-<text x="357" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Mid Doors</text>
-<text x="327" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Top Mid</text>
-<text x="147" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Upper Tunnels</text>
-<text x="87" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Lower Tunnels</text>
-<text x="237" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Window</text>
-<text x="237" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Doors</text>
+<text x="597" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Caravan Road</text>
+<text x="537" y="472" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Gatehouse</text>
+<text x="567" y="232" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Cistern</text>
+<text x="417" y="292" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Rampart</text>
+<text x="357" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Mid Arch</text>
+<text x="327" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Souk</text>
+<text x="147" y="322" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Cellar Stairs</text>
+<text x="87" y="442" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Cellars</text>
+<text x="237" y="262" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">Lattice</text>
+<text x="237" y="172" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Gate</text>
 <text x="537" y="142" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">A Site</text>
 <text x="117" y="142" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">B Site</text>
 <text x="327" y="562" fill="#d9e1cf" stroke="#283438" stroke-width="3" paint-order="stroke" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="600" font-size="9">T Spawn</text>
