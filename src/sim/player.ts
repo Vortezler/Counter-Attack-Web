@@ -87,6 +87,11 @@ export class Player {
   /** The enemy who last shot at this bot (hit or near miss), and when. */
   threat = -1;
   threatAt = -10;
+  /** Tagging: a hit slows the victim by this fraction, wearing off from `tagAt`. */
+  tag = 0;
+  tagAt = -10;
+  /** Rounds this player was the most valuable player of. */
+  mvps = 0;
   /** Combat footwork: strafe direction (-1, 0, 1), whether at walking pace, until when. */
   strafe = 0;
   strafeWalk = false;

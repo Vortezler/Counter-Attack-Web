@@ -1,8 +1,10 @@
 import "./menu.css";
+import "./loadout.css";
 import type { GridMapId } from "./world";
 import { mountBindEditor } from "./keybinds";
 import { nativeApp, touchDevice } from "./platform";
 import { controlsDiagram } from "./touch-controls";
+import { mountLoadout } from "./loadoutMenu";
 
 export type LobbyMap = GridMapId;
 export const lobbyMaps: LobbyMap[] = [
@@ -105,6 +107,8 @@ const paths = {
     '<rect x="2.5" y="3.8" width="19" height="13.5" rx="1.3"/><path d="M8 21h8m-4-3.7V21"/>',
   flag: '<path d="M5 21V3m0 1c5-3 8 3 14 0v9c-6 3-9-3-14 0"/>',
   grid: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>',
+  shirt: '<path d="M8.5 3 3.6 5.6 2 10.4l3.6 1.3V21h12.8v-9.3l3.6-1.3-1.6-4.8L15.5 3c-.7 1.5-1.9 2.3-3.5 2.3S9.2 4.5 8.5 3z"/>',
+  blade: '<path d="M3 21 13.5 10.5M13.5 10.5 21 3c-1.2 4.4-3.4 7.6-6.6 9.6M13.5 10.5l1 2.1M5.5 15.5l3 3"/>',
 };
 const icon = (key: keyof typeof paths, extra = "") =>
   `<svg class="csw-icon ${extra}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.55" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[key]}</svg>`;
@@ -240,9 +244,11 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
   menu.innerHTML = `<header class="csw-topbar"><div class="csw-topinner">
     <div class="csw-brand" aria-label="CS Web (fan project)">${logo}<div><strong>CS WEB</strong><small>FAN PROJECT</small></div></div>
     <nav class="csw-topnav" aria-label="Game navigation"><button type="button" data-nav="play" aria-current="page">${icon("play")}<span>Play</span></button>
+    <button type="button" data-nav="loadout">${icon("shirt")}<span>Loadout</span></button>
     <button type="button" data-nav="controls">${icon("keys")}<span>Controls</span></button><button type="button" data-nav="settings">${icon("gear")}<span>Settings</span></button></nav>
     <a class="csw-hub" data-hub>${icon("hub")}<span>Back to Game Hub</span></a>
   </div></header><div class="csw-lobbybody">
+    <div class="csw-view" data-view="play">
     <div class="csw-headingrow"><div><div class="csw-eyebrow csw-breadcrumb"><i></i> PLAY / SOLO</div><h1>MATCH LOBBY</h1></div>
     <div class="csw-session"><i></i> Local session</div></div>
     <p class="csw-notice" role="status" hidden></p>
@@ -266,10 +272,16 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
         <fieldset><legend>Starting side</legend><div class="csw-teamgrid">
         <button type="button" data-side="CT" aria-label="Counter-Terrorists">${insignia(true)}<span>Counter-Terrorists</span></button>
         <button type="button" data-side="T" aria-label="Terrorists">${insignia(false)}<span>Terrorists</span></button></div></fieldset>
+        <div class="csw-loadoutline"><span class="csw-loadouticon">${icon("blade")}</span><div><small>Loadout</small><strong data-lsum-agent></strong><span data-lsum-rest></span></div><button type="button" class="csw-customize" data-nav="loadout">Customize${icon("chevron")}</button></div>
         <fieldset><legend>Bot difficulty</legend><div class="csw-diffgrid">${(["easy", "normal", "hard"] as const).map((d) => `<button type="button" data-difficulty="${d}">${d}</button>`).join("")}</div></fieldset>
         <label class="csw-namelabel" for="csw-lobby-name">Player name</label><div class="csw-inputwrap">${icon("person")}<input id="csw-lobby-name" name="playerName" autocomplete="off" maxlength="48" required spellcheck="false" placeholder="Operator"></div>
         <button type="submit" class="csw-start"><span>${icon("play")}Start match</span><kbd>ENTER</kbd></button>
       </div></form>
+    </div></div>
+    <div class="csw-view" data-view="loadout" hidden>
+      <div class="csw-headingrow"><div><div class="csw-eyebrow csw-breadcrumb"><i></i> PLAY / LOADOUT</div><h1>LOADOUT</h1></div>
+      <div class="csw-session"><i></i> Saved on this device</div></div>
+      <div class="csw-loadouthost"></div>
     </div><footer class="csw-lobbyfooter"><span>${icon("monitor")} ${touchDevice ? "Mobile <b>/</b> Touch controls" : "Desktop <b>/</b> Keyboard + mouse"}</span><span>${icon("network")}64 tick</span></footer>
   </div><dialog class="csw-menudialog"><section><header><h2></h2><button type="button" data-dismiss aria-label="Close dialog">${icon("close")}</button></header><div class="csw-dialogbody"></div></section></dialog>`;
   container.append(menu);
@@ -307,11 +319,34 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
   }
   const dialog = get<HTMLDialogElement>("dialog");
   const form = get<HTMLFormElement>("form");
+  let view: "play" | "loadout" = "play";
+  const loadout = mountLoadout(get(".csw-loadouthost"), {
+    side: () => choice.side,
+    onChange: () => summarise(),
+  });
+  function summarise() {
+    const s = loadout.summary(choice.side);
+    get("[data-lsum-agent]").textContent = s.agent;
+    get("[data-lsum-rest]").textContent =
+      s.knife + " · " + (s.finishes ? s.finishes + (s.finishes === 1 ? " weapon finish" : " weapon finishes") : "factory weapons");
+  }
+  function show(next: "play" | "loadout") {
+    view = next;
+    for (const v of all<HTMLElement>("[data-view]")) v.hidden = v.dataset.view !== next;
+    if (next === "loadout") loadout.open();
+    else {
+      loadout.close();
+      summarise();
+    }
+    tab(next);
+    menu.scrollTop = 0;
+  }
   function reflect() {
     for (const b of all<HTMLButtonElement>("[data-map]"))
       b.setAttribute("aria-pressed", String(b.dataset.map === choice.map));
     for (const b of all<HTMLButtonElement>("[data-side]"))
       b.setAttribute("aria-pressed", String(b.dataset.side === choice.side));
+    summarise();
     for (const b of all<HTMLButtonElement>("[data-mode]"))
       b.setAttribute("aria-pressed", String(b.dataset.mode === choice.mode));
     const [modeName, modeCopy] = modeInfo(choice.mode, !!choice.solo);
@@ -330,19 +365,25 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     get(".csw-feature h2").textContent = info.display;
     get(".csw-featuretext p").textContent = info.copy;
     const img = get<HTMLImageElement>(".csw-featureimg");
-    if (img.getAttribute("src") !== art(choice.map)) img.src = art(choice.map);
+    if (img.getAttribute("src") !== art(choice.map)) {
+      img.src = art(choice.map);
+      // Replay the fade so switching maps eases in rather than snapping.
+      img.classList.remove("csw-fadein");
+      void img.offsetWidth;
+      img.classList.add("csw-fadein");
+    }
     get(".csw-poolcount").textContent =
       String(lobbyMaps.indexOf(choice.map) + 1).padStart(2, "0") +
       " / " +
       String(lobbyMaps.length).padStart(2, "0");
   }
   reflect();
-  const tab = (active: string) => {
-    for (const b of all<HTMLButtonElement>("[data-nav]")) {
+  function tab(active: string) {
+    for (const b of all<HTMLButtonElement>(".csw-topnav [data-nav]")) {
       if (b.dataset.nav === active) b.setAttribute("aria-current", "page");
       else b.removeAttribute("aria-current");
     }
-  };
+  }
   let dialogListeners: AbortController | undefined;
   function showPanel(kind: "controls" | "settings") {
     dialogListeners?.abort();
@@ -418,7 +459,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
   dialog.addEventListener(
     "close",
     () => {
-      tab("play");
+      tab(view);
       dialogListeners?.abort();
     },
     { signal },
@@ -462,8 +503,11 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
       }
       if (nav === "controls" || nav === "settings") showPanel(nav);
       if (b.hasAttribute("data-dismiss")) dialog.close();
-      if (nav === "play")
+      if (nav === "loadout") show("loadout");
+      if (nav === "play") {
+        show("play");
         get<HTMLButtonElement>("[data-map][aria-pressed=true]").focus();
+      }
     },
     { signal },
   );
@@ -500,6 +544,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
         e.key === "Enter" &&
         !e.repeat &&
         !dialog.open &&
+        view === "play" &&
         !target.closest("button,input,select,a,textarea,[contenteditable]") &&
         menu.isConnected &&
         !menu.closest("[hidden]")
@@ -515,6 +560,7 @@ export function mountMenu(container: HTMLElement, options: MenuOptions) {
     openControls: () => showPanel("controls"),
     destroy() {
       dialogListeners?.abort();
+      loadout.destroy();
       controller.abort();
       if (dialog.open) dialog.close();
       menu.remove();

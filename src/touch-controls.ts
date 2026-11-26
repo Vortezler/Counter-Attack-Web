@@ -232,12 +232,16 @@ export function mountTouchControls(
 
   /** HUD readouts that act as controls, checked before the invisible buttons. */
   function hudTarget(cx: number, cy: number): Pointer | undefined {
-    for (const item of hud.querySelectorAll<HTMLElement>(".csw-inventory li[data-slot]")) {
-      if (within(item.getBoundingClientRect(), cx, cy, 3)) {
-        handlers.slot(Number(item.dataset.slot));
-        tick();
-        return { kind: "spent" };
-      }
+    // The item under the finger wins; a few pixels of slack only for near misses, so a
+    // neighbouring item can never steal a tap that landed squarely on another.
+    const items = [...hud.querySelectorAll<HTMLElement>(".csw-inventory li[data-slot]")],
+      item =
+        items.find((i) => within(i.getBoundingClientRect(), cx, cy, 0)) ??
+        items.find((i) => within(i.getBoundingClientRect(), cx, cy, 3));
+    if (item) {
+      handlers.slot(Number(item.dataset.slot));
+      tick();
+      return { kind: "spent" };
     }
     if (within(rect(".csw-intel"), cx, cy, 6)) {
       handlers.buy();

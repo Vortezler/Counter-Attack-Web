@@ -8,15 +8,20 @@ import { gunModel } from "./gunModels";
 import { drawsBox, mapScenery } from "./scenery";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import {
+  agentFor,
+  fabric,
   hold,
   humanoid,
   muzzleOf,
-  palettes,
   pose,
+  shade,
   PLANT_SPOT,
   type Humanoid,
   type Ragdoll,
 } from "./characters";
+import { knifeModel } from "./knives";
+import { applyFinish, keepFinish } from "./skins";
+import { botLook, finishFor, lookOf, type Agent, type Loadout, type Look } from "./cosmetics";
 
 export interface RenderActor extends Vec3 {
   id: number;
@@ -139,127 +144,9 @@ function barrel(
   m.rotation.x = Math.PI / 2;
   return m;
 }
-/**
- * A tapered steel blade lofted along its length: flat-ground sides from the spine down to a
- * grind line, then a brighter bevel to a fine edge. The belly sweeps up and the spine clips
- * down to the point. Flat in the y-z plane, pointing down -z from `z0`.
- */
-function bladeGeometry(length: number, z0: number) {
-  const N = 32,
-    rows: number[][][] = [];
-  for (let i = 0; i <= N; i++) {
-    const s = (i / N) * length,
-      clip = Math.max(0, (s - 0.12) / (length - 0.12)),
-      belly = Math.max(0, (s - 0.085) / (length - 0.085)),
-      spine = 0.011 - 0.0095 * clip ** 0.9,
-      edge = -0.019 + 0.0205 * (1 - Math.sqrt(Math.max(0, 1 - belly * belly))),
-      height = spine - edge,
-      grind = edge + height * 0.52,
-      t = 0.0021 * (1 - 0.5 * (s / length)) * Math.min(1, height / 0.012),
-      e = 0.00018 * Math.min(1, height / 0.012),
-      z = z0 - s;
-    rows.push([
-      [t, spine, z],
-      [t, grind, z],
-      [e, edge, z],
-      [-e, edge, z],
-      [-t, grind, z],
-      [-t, spine, z],
-    ]);
-  }
-  const strip = (pairs: [number, number][]) => {
-    const pos: number[] = [],
-      index: number[] = [];
-    for (const [a, b] of pairs) {
-      const base = pos.length / 3;
-      for (const row of rows) pos.push(...row[a], ...row[b]);
-      for (let i = 0; i < N; i++) {
-        const k = base + i * 2;
-        index.push(k, k + 1, k + 2, k + 1, k + 3, k + 2);
-      }
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-    geo.setIndex(index);
-    geo.computeVertexNormals();
-    return geo;
-  };
-  return {
-    // Each facet is its own strip so it shades smoothly along the blade but keeps crisp ridges.
-    flats: strip([
-      [0, 1],
-      [4, 5],
-      [5, 0],
-    ]),
-    bevels: strip([
-      [1, 2],
-      [2, 3],
-      [3, 4],
-    ]),
-  };
-}
-const steel = (color: number, roughness: number, metalness = 1) =>
-  new THREE.MeshStandardMaterial({ color, roughness, metalness });
-/** A fixed-blade combat knife; the handle runs along z through the origin, the blade forward. */
-function knife(g: THREE.Group) {
-  const { flats, bevels } = bladeGeometry(0.19, -0.048);
-  g.add(new THREE.Mesh(flats, steel(0xaeb4b9, 0.32)));
-  g.add(new THREE.Mesh(bevels, steel(0xe4e8eb, 0.14)));
-  const guard = new THREE.Mesh(
-    new RoundedBoxGeometry(0.017, 0.044, 0.0075, 2, 0.003),
-    steel(0x3b4045, 0.4, 0.85),
-  );
-  guard.position.set(0, -0.004, -0.051);
-  g.add(guard);
-  // Moulded grip: an oval section that swells toward the pommel, with finger ridges near the guard.
-  const profile: THREE.Vector2[] = [];
-  for (let i = 0; i <= 24; i++) {
-    const f = i / 24;
-    profile.push(
-      new THREE.Vector2(
-        0.0118 + 0.0016 * f + 0.0011 * Math.max(0, Math.sin(f * Math.PI * 4.5)) * (1 - f),
-        -0.048 + f * 0.1,
-      ),
-    );
-  }
-  const handle = new THREE.LatheGeometry(profile, 20);
-  handle.rotateX(Math.PI / 2);
-  handle.scale(0.76, 1, 1);
-  handle.translate(0, -0.004, 0);
-  g.add(
-    new THREE.Mesh(
-      handle,
-      new THREE.MeshStandardMaterial({ color: 0x24282a, roughness: 0.82 }),
-    ),
-  );
-  for (const z of [-0.012, 0.012, 0.036]) {
-    const band = new THREE.Mesh(
-      new THREE.TorusGeometry(0.0128 + (z + 0.048) * 0.016, 0.0009, 4, 20),
-      new THREE.MeshStandardMaterial({ color: 0x15181a, roughness: 0.9 }),
-    );
-    band.scale.set(0.79, 1.02, 1);
-    band.position.set(0, -0.004, z);
-    g.add(band);
-  }
-  const pommel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.0122, 0.0108, 0.011, 18),
-    steel(0x3b4045, 0.4, 0.85),
-  );
-  pommel.rotation.x = Math.PI / 2;
-  pommel.scale.set(0.8, 1, 1);
-  pommel.position.set(0, -0.004, 0.0575);
-  g.add(pommel);
-  const loop = new THREE.Mesh(
-    new THREE.TorusGeometry(0.0045, 0.0013, 6, 14),
-    steel(0x3b4045, 0.4, 0.85),
-  );
-  loop.rotation.y = Math.PI / 2;
-  loop.position.set(0, -0.004, 0.066);
-  g.add(loop);
-}
 function special(id: string, g: THREE.Group) {
   if (id === "knife") {
-    knife(g);
+    g.add(knifeModel("combat"));
     return true;
   }
   if (id === "smoke") {
@@ -635,75 +522,130 @@ function gun(id: string) {
   }
   return g;
 }
+/** Cloth for sleeves: the soldiers' shared weave texture under a per-part colour. */
+function cloth(color: string, rough = 0.9) {
+  return new THREE.MeshStandardMaterial({ color, roughness: rough, map: fabric() });
+}
+function sleevePiece(host: THREE.Object3D, geo: THREE.BufferGeometry, color: string, x = 0, y = 0, z = 0) {
+  const m = new THREE.Mesh(geo, cloth(color));
+  m.position.set(x, y, z);
+  host.add(m);
+  return m;
+}
 /**
  * A gloved hand closed around a grip at (x, y, z), with its forearm running back toward the
- * camera. Given a `fist` group, the hand is built around that group's origin so it can be
- * posed separately; `point` straightens the index finger for pressing keys.
+ * camera, dressed by the agent: long sleeves with a cuff and patch (carrier), rolled sleeves
+ * over a bare forearm (rig), or a ribbed hoodie cuff. Given a fist group, the hand is built
+ * around that group's origin so it can be posed separately; point straightens the index
+ * finger for pressing keys.
  */
 function addHand(
   rig: THREE.Object3D,
-  team: Team,
+  agent: Agent,
   x: number,
   y: number,
   z: number,
   left: boolean,
   fist?: THREE.Group,
   point = false,
-  /** Carry the forearm with `fist`, so the whole hand and arm can be animated together. */
+  /** Carry the forearm with the fist, so the whole hand and arm can be animated together. */
   carry = false,
 ) {
-  const ct = team === "CT",
-    c = ct ? palettes.CT : palettes.T;
-  {
-    const s = left ? -1 : 1,
-      host = fist ?? rig,
-      arm = new THREE.Group();
-    arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
-    // A hand that holds the knife is built in its own wrist-bent frame around the palm.
-    if (fist) x = y = z = 0;
-    if (fist && carry) arm.position.set(left ? -0.051 : 0.06, -0.122, 0.135);
-    const palm = piece(host, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), c.glove, x, y, z);
-    palm.rotation.x = 0.24;
-    // Fingers wrap across the front of the grip; the thumb closes over the top.
-    for (let i = 0; i < 4; i++) {
-      const finger = piece(
-        host,
-        new THREE.CapsuleGeometry(0.0115, 0.034, 3, 8),
-        c.glove,
-        x - s * 0.01,
-        y + 0.03 - i * 0.021,
-        z - 0.04 + i * 0.005,
-      );
-      finger.rotation.z = Math.PI / 2;
-      if (point && i === 0) {
-        finger.rotation.set(Math.PI / 2, 0, 0);
-        finger.position.set(x - s * 0.01, y + 0.03, z - 0.07);
-      }
-    }
-    const thumb = piece(host, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), c.glove, x - s * 0.03, y + 0.036, z + 0.008);
-    thumb.rotation.set(-0.7, 0, s * 0.4);
-    part(host, 0.012, 0.06, 0.05, ct ? "#1b1e1f" : "#2c2720", x + s * 0.031, y + 0.004, z - 0.004);
-    arm.rotation.set(-0.91, 0, left ? -0.3 : 0.36);
-    (fist && carry ? fist : rig).add(arm);
-    if (ct) {
-      piece(arm, new THREE.CylinderGeometry(0.052, 0.08, 0.35, 14), left ? "#53626a" : palettes.CT.shirt, 0, 0, 0);
-      piece(arm, new THREE.CylinderGeometry(0.047, 0.05, 0.05, 14), c.glove, 0, 0.17, 0);
-      piece(arm, new THREE.CylinderGeometry(0.057, 0.06, 0.014, 14), palettes.CT.dark, 0, 0.1, 0);
-    } else {
-      piece(arm, new THREE.CylinderGeometry(0.044, 0.058, 0.35, 14), palettes.T.skin, 0, 0, 0);
-      piece(arm, new THREE.CylinderGeometry(0.076, 0.083, 0.08, 14), palettes.T.dark, 0, -0.15, 0);
-      piece(arm, new THREE.CylinderGeometry(0.046, 0.047, 0.04, 14), c.glove, 0, 0.17, 0);
+  const c = agent.colors,
+    s = left ? -1 : 1,
+    host = fist ?? rig,
+    arm = new THREE.Group(),
+    glove = c.glove,
+    knuckle = shade(c.glove, -0.35);
+  arm.position.set(x + (left ? -0.051 : 0.06), y - 0.122, z + 0.135);
+  // A hand that holds the knife is built in its own wrist-bent frame around the palm.
+  if (fist) x = y = z = 0;
+  if (fist && carry) arm.position.set(left ? -0.051 : 0.06, -0.122, 0.135);
+  const palm = piece(host, new RoundedBoxGeometry(0.06, 0.088, 0.075, 2, 0.022), glove, x, y, z);
+  palm.rotation.x = 0.24;
+  // Padded knuckle guard across the back of the hand.
+  const guard = piece(host, new RoundedBoxGeometry(0.014, 0.07, 0.05, 2, 0.006), knuckle, x + s * 0.031, y + 0.012, z - 0.012);
+  guard.rotation.x = 0.24;
+  // Fingers wrap across the front of the grip; the thumb closes over the top.
+  for (let i = 0; i < 4; i++) {
+    const finger = piece(
+      host,
+      new THREE.CapsuleGeometry(0.0115, 0.034, 3, 8),
+      glove,
+      x - s * 0.01,
+      y + 0.03 - i * 0.021,
+      z - 0.04 + i * 0.005,
+    );
+    finger.rotation.z = Math.PI / 2;
+    if (point && i === 0) {
+      finger.rotation.set(Math.PI / 2, 0, 0);
+      finger.position.set(x - s * 0.01, y + 0.03, z - 0.07);
     }
   }
+  const thumb = piece(host, new THREE.CapsuleGeometry(0.012, 0.036, 3, 8), glove, x - s * 0.03, y + 0.036, z + 0.008);
+  thumb.rotation.set(-0.7, 0, s * 0.4);
+  part(host, 0.012, 0.06, 0.05, shade(c.glove, -0.25), x + s * 0.031, y + 0.004, z - 0.004);
+  arm.rotation.set(-0.91, 0, left ? -0.3 : 0.36);
+  (fist && carry ? fist : rig).add(arm);
+  // Glove cuff over the wrist.
+  piece(arm, new THREE.CylinderGeometry(0.047, 0.05, 0.05, 16), glove, 0, 0.17, 0);
+  piece(arm, new THREE.CylinderGeometry(0.0485, 0.0485, 0.012, 16), knuckle, 0, 0.15, 0);
+  if (agent.torso === "rig") {
+    // Bare forearm under a rolled sleeve.
+    piece(arm, new THREE.CylinderGeometry(0.044, 0.058, 0.35, 16), c.skin, 0, 0, 0);
+    sleevePiece(arm, new THREE.CylinderGeometry(0.078, 0.084, 0.085, 16), c.dark, 0, -0.15, 0);
+    sleevePiece(arm, new THREE.TorusGeometry(0.075, 0.011, 6, 20), shade(c.dark, -0.12), 0, -0.108, 0).rotation.x = Math.PI / 2;
+  } else {
+    sleevePiece(arm, new THREE.CylinderGeometry(0.052, 0.08, 0.35, 16), left ? shade(c.shirt, -0.06) : c.shirt, 0, 0, 0);
+    if (agent.torso === "hoodie") {
+      // Ribbed cuff bunched at the wrist.
+      for (let i = 0; i < 3; i++)
+        sleevePiece(arm, new THREE.TorusGeometry(0.052, 0.006, 5, 18), shade(c.shirt, -0.15), 0, 0.105 + i * 0.012, 0).rotation.x = Math.PI / 2;
+    } else {
+      sleevePiece(arm, new THREE.CylinderGeometry(0.057, 0.06, 0.016, 16), c.dark, 0, 0.1, 0);
+      // Hook-and-loop patch with the unit's accent on the outside of the forearm.
+      const patch = part(arm, 0.004, 0.06, 0.045, c.accent, s * 0.066, -0.06, 0);
+      patch.rotation.z = s * 0.08;
+    }
+  }
+  if (left) {
+    // A field watch on the left wrist, face toward the eye.
+    const strap = piece(arm, new THREE.CylinderGeometry(0.05, 0.05, 0.018, 16), "#1a1c1d", 0, 0.128, 0);
+    strap.scale.set(1.02, 1, 0.98);
+    const face = piece(arm, new THREE.CylinderGeometry(0.017, 0.017, 0.01, 18), "#2b2f31", -0.004, 0.128, -0.05);
+    face.rotation.x = Math.PI / 2;
+    const glass = new THREE.Mesh(
+      new THREE.CircleGeometry(0.0135, 18),
+      new THREE.MeshStandardMaterial({ color: "#9fd8c4", emissive: "#3d8f74", emissiveIntensity: 0.5, roughness: 0.15 }),
+    );
+    glass.position.set(-0.004, 0.128, -0.0555);
+    glass.rotation.y = Math.PI;
+    arm.add(glass);
+  }
 }
-function heldWeapon(id: string, team: Team) {
+const unskinned = new Set(["he", "flash", "smoke", "molly", "bomb"]);
+/** The weapon id as a look shows it: the chosen knife model, and the finish on either. */
+export function dressed(id: string, look?: Look) {
+  if (id === "knife") {
+    const g = new THREE.Group(),
+      k = knifeModel(look?.knife ?? "combat");
+    g.add(k);
+    applyFinish(k, finishFor(look, "knife"), "knife");
+    g.userData.spin = k.userData.spin;
+    return g;
+  }
+  const g = gun(id);
+  if (!unskinned.has(id)) applyFinish(g, finishFor(look, id), "gun");
+  return g;
+}
+function heldWeapon(id: string, agent: Agent, look?: Look) {
   const rig = new THREE.Group(),
-    model = gun(id);
+    model = dressed(id, look);
   rig.userData.muzzle = muzzleOf(model);
   rig.userData.textured = !!model.userData.textured;
   rig.add(model);
   const hand = (x: number, y: number, z: number, left: boolean, fist?: THREE.Group) =>
-    addHand(rig, team, x, y, z, left, fist);
+    addHand(rig, agent, x, y, z, left, fist);
   if (id === "knife") {
     // Hammer grip: the handle runs up through the fist and the wrist cocks the blade forward
     // and inward, edge toward the fingers.
@@ -718,6 +660,7 @@ function heldWeapon(id: string, team: Team) {
     hand(0.02, -0.04, 0.02, false, fist);
     rig.userData.fist = fist;
     rig.userData.grip = fist.quaternion.clone();
+    rig.userData.spin = model.userData.spin;
   } else hand(0.038, -0.083, 0.033, false);
   const small = [
     "he",
@@ -735,7 +678,7 @@ function heldWeapon(id: string, team: Team) {
     const off = new THREE.Group();
     off.position.set(small ? -0.043 : -0.038, small ? -0.104 : -0.038, small ? -0.025 : -0.195);
     rig.add(off);
-    addHand(rig, team, off.position.x, off.position.y, off.position.z, true, off, false, true);
+    addHand(rig, agent, off.position.x, off.position.y, off.position.z, true, off, false, true);
     rig.userData.off = off;
     rig.userData.offBase = off.position.clone();
     if (model.userData.textured) reloadProps(rig, model, id);
@@ -762,8 +705,10 @@ function clipped(root: THREE.Object3D, clip: THREE.Plane[], keepInside: boolean)
   root.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    m.material = (m.material as THREE.Material).clone();
+    const before = m.material as THREE.Material;
+    m.material = before.clone();
     m.material.userData = {};
+    keepFinish(before, m.material);
     m.material.clipIntersection = !keepInside;
     m.material.clippingPlanes = keepInside ? clip : NO_PLANES;
     mats.push(m.material);
@@ -1013,7 +958,7 @@ const CODE = "4190273";
  * First-person planting: the C4 held low in front, the left hand steadying it while the right
  * index finger types the arming code on the keypad, digit by digit on the little screen.
  */
-function plantRig(team: Team) {
+function plantRig(team: Agent) {
   const rig = new THREE.Group(),
     c4 = gun("bomb");
   c4.position.set(0.0, -0.215, -0.5);
@@ -1046,7 +991,7 @@ function plantRig(team: Team) {
  * progress) and two leads run from it down to the bomb, the right hand working a clip;
  * without one, both hands work the wires by hand.
  */
-function defuseRig(team: Team, kit: boolean) {
+function defuseRig(team: Agent, kit: boolean) {
   const rig = new THREE.Group(),
     data: Record<string, unknown> = { kind: "defuse" };
   if (kit) {
@@ -2419,7 +2364,7 @@ function worldMeshes(map: MapDef, scene: THREE.Scene) {
   }
 }
 
-function releaseTree(root: THREE.Object3D) {
+export function releaseTree(root: THREE.Object3D) {
   const geometry = new Set<THREE.BufferGeometry>(),
     material = new Set<THREE.Material>(),
     textures = new Set<THREE.Texture>();
@@ -2513,6 +2458,11 @@ export class GameRenderer {
   private degraded = false;
   private shadowSetting = true;
   private environment: THREE.Texture;
+  /** The local player's saved loadout, their actor id, and the seed for bots' looks. */
+  private loadout: Loadout | null = null;
+  private viewer = 0;
+  private lookSeed = 0;
+  private looks = new Map<string, Look>();
   constructor(
     public canvas: HTMLCanvasElement,
     public map: MapDef,
@@ -2638,6 +2588,23 @@ export class GameRenderer {
     this.hands.add(this.muzzleLight);
     this.blood = new BloodFx(this.scene, this.puff);
     this.resize();
+  }
+  /** Dresses actor `viewer` in `loadout`; everyone else gets a look fixed by `seed`. */
+  setLoadout(loadout: Loadout | null, viewer = 0, seed = 0) {
+    this.loadout = loadout;
+    this.viewer = viewer;
+    this.lookSeed = seed;
+    this.looks.clear();
+  }
+  /** What actor `id` wears on `team`. */
+  lookFor(id: number, team: Team): Look {
+    const key = id + ":" + team;
+    let look = this.looks.get(key);
+    if (!look) {
+      look = this.loadout && id === this.viewer ? lookOf(this.loadout, team) : botLook(id, team, this.lookSeed);
+      this.looks.set(key, look);
+    }
+    return look;
   }
   resize() {
     const w = Math.round(
@@ -3004,7 +2971,7 @@ export class GameRenderer {
       let obj = this.loot.get(d.id);
       if (!obj) {
         const holder = new THREE.Group(),
-          item = d.item === "kit" ? kitModel() : gun(d.item);
+          item = d.item === "kit" ? kitModel() : dressed(d.item);
         if (d.item !== "kit") flatten(item);
         item.traverse((o) => {
           if ((o as THREE.Mesh).isMesh) o.castShadow = true;
@@ -3224,14 +3191,15 @@ export class GameRenderer {
     }
     for (const p of f.actors) {
       let model = this.people.get(p.id);
-      if (model && model.team !== p.team) {
+      const look = this.lookFor(p.id, p.team);
+      if (model && (model.team !== p.team || model.agent !== agentFor(p.team, look.agent).id)) {
         this.scene.remove(model.root);
         releaseTree(model.root);
         this.people.delete(p.id);
         model = undefined;
       }
       if (!model) {
-        model = humanoid(p.team);
+        model = humanoid(p.team, look.agent);
         this.people.set(p.id, model);
         this.scene.add(model.root);
       }
@@ -3245,15 +3213,17 @@ export class GameRenderer {
         );
       const rag = this.ragdolls.get(p.id);
       model.root.visible = p.id !== f.viewId && (p.alive || !!rag);
-      const weapon = p.weapon ?? "glock";
-      if (p.alive && model.root.visible && model.item !== weapon) {
+      const weapon = p.weapon ?? "glock",
+        itemKey = weapon + ":" + finishFor(look, weapon) + (weapon === "knife" ? ":" + look.knife : "");
+      if (p.alive && model.root.visible && model.itemKey !== itemKey) {
         releaseTree(model.held);
         model.held.clear();
-        const item = gun(weapon);
+        const item = dressed(weapon, look);
         item.userData.muzzle = muzzleOf(item);
         flatten(item);
         model.held.add(item);
         hold(model, weapon);
+        model.itemKey = itemKey;
       }
       const last = p.last ?? p,
         alpha = f.alpha ?? 1;
@@ -3331,24 +3301,27 @@ export class GameRenderer {
     }
     this.viewId = f.viewId;
     const viewTeam = f.actors.find((a) => a.id === f.viewId)?.team ?? "CT",
-      gunKey = viewTeam + ":" + f.weapon;
+      viewLook = this.lookFor(f.viewId, viewTeam),
+      viewAgent = agentFor(viewTeam, viewLook.agent),
+      gunKey =
+        viewAgent.id + ":" + f.weapon + ":" + finishFor(viewLook, f.weapon) + (f.weapon === "knife" ? ":" + viewLook.knife : "");
     if (this.currentGun !== gunKey) {
       const old = this.arsenal.get(this.currentGun);
       if (old) old.visible = false;
       if (!this.arsenal.has(gunKey)) {
-        const rig = heldWeapon(f.weapon, viewTeam);
+        const rig = heldWeapon(f.weapon, viewAgent, viewLook);
         this.arsenal.set(gunKey, rig);
         this.hands.add(rig);
       }
       this.currentGun = gunKey;
     }
     const job = f.task && f.task.actor === f.viewId && !f.spectating ? f.task : undefined,
-      jobKey = job ? job.kind + ":" + viewTeam + ":" + job.kit : "";
+      jobKey = job ? job.kind + ":" + viewAgent.id + ":" + job.kit : "";
     for (const [key, r] of this.jobs) r.visible = key === jobKey;
     if (job) {
       let r = this.jobs.get(jobKey);
       if (!r) {
-        r = job.kind === "plant" ? plantRig(viewTeam) : defuseRig(viewTeam, job.kit);
+        r = job.kind === "plant" ? plantRig(viewAgent) : defuseRig(viewAgent, job.kit);
         this.jobs.set(jobKey, r);
         this.hands.add(r);
       }
@@ -3437,6 +3410,12 @@ export class GameRenderer {
           rig.rotateZ(a * (0.55 - 0.85 * w));
           rig.rotateX(a * (0.1 + 0.12 * w) + sway * 0.6);
         }
+      }
+      const spin = rig.userData.spin as THREE.Object3D | undefined;
+      if (spin) {
+        const p = ins !== undefined && ins < 1 && !f.reducedMotion ? Math.min(1, Math.max(0, (ins - 0.3) / 0.32)) : 0,
+          turns = rig.userData.spinTurns ?? 2;
+        spin.rotation.x = -Math.PI * 2 * turns * (p * p * (3 - 2 * p));
       }
       const fist = rig.userData.fist as THREE.Object3D | undefined;
       if (fist)

@@ -21,6 +21,7 @@ import { GameAudio } from "./audio";
 import { startAmbience, type Ambience } from "./ambience";
 import type { MapId, floorAt } from "./world";
 import { catalog, isGun } from "./config/weapons";
+import { loadLoadout } from "./cosmetics";
 import {
   actionFor,
   binds,
@@ -40,6 +41,7 @@ const slots: Partial<Record<Action, number>> = {
   bomb: 5,
   previous: -1,
   next: 9,
+  drop: 20,
 };
 export interface GameOptions extends Partial<Omit<MenuChoice, "settings">> {
   seed?: number;
@@ -457,6 +459,8 @@ export async function createGame(
       }
       audio.self = sim.viewer;
       renderer = new engine.GameRenderer(canvas!, map, touch ? "low" : "high");
+      // The player wears their saved loadout; everyone else a look fixed for this match.
+      renderer.setLoadout(opts.botsOnly ? null : loadLoadout(), sim.viewer, seed);
       ambience = startAmbience(map.id);
       hud = new (arena ? arena[1].ArenaHud : overlay.MatchHud)(
         stage!,
@@ -482,6 +486,8 @@ export async function createGame(
         opts.debug,
       );
       hud.touch = touch;
+      const view = renderer;
+      hud.lookOf = (p) => view.lookFor(p.id, p.team);
       sim.onEvent(event => {
         ingest(event);
         if (host && event.type !== "trace" && event.type !== "matchEnd") {

@@ -1,6 +1,7 @@
 /**
- * Third-person soldiers. CTs wear plate carriers, high-cut helmets and full-face gas masks;
- * Ts wear jackets, chest rigs, shemaghs and knit balaclavas. Every limb is jointed (hip, knee,
+ * Third-person soldiers, dressed by their agent (see cosmetics.ts): plate carriers or chest rigs
+ * or hoodies, and helmets with respirators or goggles, boonie hats, hoods, beanies, shemaghs or
+ * knit balaclavas. Every limb is jointed (hip, knee,
  * ankle, shoulder, elbow) and the arms reach the held weapon with two-bone IK, so hands stay on
  * the grip and foregrip as the weapon pitches and recoils.
  */
@@ -8,6 +9,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Team } from "./world";
+import { agentById, defaultAgent, type Agent } from "./cosmetics";
 
 type Finish = "cloth" | "gloss";
 
@@ -81,7 +83,7 @@ const shell = (
 
 let fabricMap: THREE.CanvasTexture | null = null;
 /** A light weave-and-noise texture; vertex colours tint it per part. Shared by every soldier. */
-function fabric() {
+export function fabric() {
   if (fabricMap) return fabricMap;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 128;
@@ -168,38 +170,16 @@ export function bake(group: THREE.Group, texture = true) {
   }
 }
 
-export const palettes = {
-  CT: {
-    shirt: "#56656e",
-    pants: "#4b5960",
-    dark: "#3f4b51",
-    gear: "#2f3a3e",
-    pouch: "#3a474c",
-    strap: "#262d30",
-    glove: "#252829",
-    boot: "#25231f",
-    skin: "#c39a7b",
-    helmet: "#3c494d",
-    rubber: "#1c2022",
-    lens: "#2a5560",
-    filter: "#5b6248",
-    accent: "#8d9b5c",
-  },
-  T: {
-    shirt: "#8b7653",
-    pants: "#4d4b3b",
-    dark: "#6f5f43",
-    gear: "#5d5337",
-    pouch: "#6b6041",
-    strap: "#3f3827",
-    glove: "#39332a",
-    boot: "#4e3c2a",
-    skin: "#b6886a",
-    knit: "#1f1f1e",
-    scarf: "#8a7a5c",
-    eye: "#efe9d6",
-  },
-};
+/** The outfit a soldier on `team` wears: `id` if it belongs to that side, else the side's default. */
+export function agentFor(team: Team, id?: string): Agent {
+  const a = id ? agentById.get(id) : undefined;
+  return a && a.side === team ? a : agentById.get(defaultAgent[team])!;
+}
+/** Lightens (k > 0) or darkens (k < 0) a hex colour. */
+export function shade(hexColor: string, k: number) {
+  const c = new THREE.Color(hexColor);
+  return "#" + (k >= 0 ? c.lerp(new THREE.Color(1, 1, 1), k) : c.multiplyScalar(1 + k)).getHexString();
+}
 
 interface Arm {
   shoulder: THREE.Group;
@@ -212,8 +192,8 @@ interface Leg {
   ankle: THREE.Group;
 }
 
-function buildTorso(torso: THREE.Group, ct: boolean) {
-  const c = ct ? palettes.CT : palettes.T;
+function buildTorso(torso: THREE.Group, a: Agent) {
+  const c = a.colors;
   const chest = add(
     torso,
     lathe(
@@ -236,149 +216,287 @@ function buildTorso(torso: THREE.Group, ct: boolean) {
   );
   chest.scale.z = 0.64;
   for (const s of [-1, 1])
-    add(torso, ball(0.066, 10, 8), c.shirt, s * 0.19, ty(1.39), 0).scale.set(
-      1,
-      0.9,
-      1.12,
-    );
-  if (ct) {
-    const k = palettes.CT;
-    add(torso, tube(0.072, 0.088, 0.055, 14), k.shirt, 0, ty(1.455), 0.005);
+    add(torso, ball(0.066, 10, 8), c.shirt, s * 0.19, ty(1.39), 0).scale.set(1, 0.9, 1.12);
+  if (a.torso === "carrier") {
+    add(torso, tube(0.072, 0.088, 0.055, 14), c.shirt, 0, ty(1.455), 0.005);
     // Plate carrier: front and back plates, cummerbund, shoulder straps.
-    add(torso, rbox(0.34, 0.37, 0.07, 0.022), k.gear, 0, ty(1.2), -0.125);
-    add(torso, rbox(0.33, 0.37, 0.06, 0.022), k.gear, 0, ty(1.21), 0.12);
+    add(torso, rbox(0.34, 0.37, 0.07, 0.022), c.gear, 0, ty(1.2), -0.125);
+    add(torso, rbox(0.33, 0.37, 0.06, 0.022), c.gear, 0, ty(1.21), 0.12);
     for (const s of [-1, 1]) {
-      add(torso, rbox(0.05, 0.2, 0.2, 0.016), k.gear, s * 0.178, ty(1.11), 0);
-      add(torso, rbox(0.075, 0.035, 0.27, 0.012), k.strap, s * 0.105, ty(1.425), 0);
+      add(torso, rbox(0.05, 0.2, 0.2, 0.016), c.gear, s * 0.178, ty(1.11), 0);
+      add(torso, rbox(0.075, 0.035, 0.27, 0.012), c.strap, s * 0.105, ty(1.425), 0);
+      // Shoulder pads sit over the straps.
+      add(torso, rbox(0.085, 0.022, 0.1, 0.009), c.pouch, s * 0.12, ty(1.445), -0.02);
     }
+    // MOLLE webbing rows across the front plate.
+    for (const y of [1.06, 1.33]) add(torso, rbox(0.33, 0.012, 0.074, 0.004), c.strap, 0, ty(y), -0.127);
     // Triple rifle-mag pouch with flaps, admin pouch and a unit patch.
     for (const x of [-0.086, 0, 0.086]) {
-      add(torso, rbox(0.074, 0.12, 0.05, 0.012), k.pouch, x, ty(1.105), -0.182);
-      add(torso, rbox(0.077, 0.032, 0.055, 0.01), k.strap, x, ty(1.165), -0.183);
+      add(torso, rbox(0.074, 0.12, 0.05, 0.012), c.pouch, x, ty(1.105), -0.182);
+      add(torso, rbox(0.077, 0.032, 0.055, 0.01), c.strap, x, ty(1.165), -0.183);
     }
-    add(torso, rbox(0.17, 0.075, 0.04, 0.012), k.pouch, 0, ty(1.29), -0.172);
-    add(torso, rbox(0.07, 0.042, 0.008, 0.003), k.accent, -0.055, ty(1.3), -0.193);
-    // Radio with antenna and a hydration carrier on the back.
-    add(torso, rbox(0.075, 0.15, 0.05, 0.012), k.pouch, -0.09, ty(1.27), 0.165);
-    add(torso, tube(0.006, 0.006, 0.3, 6), k.rubber, -0.11, ty(1.47), 0.17);
-    add(torso, rbox(0.2, 0.22, 0.04, 0.016), k.pouch, 0.03, ty(1.1), 0.163);
-  } else {
-    const k = palettes.T;
-    // Shemagh wrapped round the neck, its tail hanging down the back.
-    const scarf = add(torso, new THREE.TorusGeometry(0.074, 0.033, 8, 18), k.scarf, 0, ty(1.455), 0);
-    scarf.rotation.x = Math.PI / 2;
-    scarf.scale.set(1, 1.12, 1);
-    const tail = add(torso, rbox(0.1, 0.17, 0.022, 0.008), k.scarf, 0.03, ty(1.36), 0.128);
-    tail.rotation.x = 0.12;
-    // Jacket placket, hip pockets, chest rig with AK mags.
-    add(torso, rbox(0.026, 0.42, 0.012, 0.004), k.dark, 0, ty(1.16), -0.122);
-    for (const s of [-1, 1])
-      add(torso, rbox(0.1, 0.085, 0.02, 0.008), k.dark, s * 0.1, ty(0.99), -0.112);
-    add(torso, rbox(0.31, 0.15, 0.05, 0.016), k.gear, 0, ty(1.14), -0.137);
-    for (const x of [-0.09, 0, 0.09]) {
-      add(torso, rbox(0.072, 0.15, 0.045, 0.012), k.pouch, x, ty(1.165), -0.17);
-      const mag = add(torso, rbox(0.03, 0.065, 0.055, 0.006), "#35342f", x, ty(1.265), -0.17, "gloss");
-      mag.rotation.x = -0.18;
-    }
-    add(torso, ball(0.04, 10, 8), "#4a5236", 0.17, ty(1.08), -0.09);
-    // Harness: straps over the shoulders and crossed on the back.
-    for (const s of [-1, 1]) {
-      const front = add(torso, rbox(0.045, 0.2, 0.014, 0.005), k.strap, s * 0.1, ty(1.33), -0.124);
-      front.rotation.x = 0.22;
-      const back = add(torso, rbox(0.045, 0.44, 0.014, 0.005), k.strap, 0, ty(1.22), 0.124);
-      back.rotation.z = s * 0.55;
-    }
+    add(torso, rbox(0.17, 0.075, 0.04, 0.012), c.pouch, 0, ty(1.29), -0.172);
+    add(torso, rbox(0.07, 0.042, 0.008, 0.003), c.accent, -0.055, ty(1.3), -0.193);
+    // Radio with antenna, hydration carrier and a drag handle on the back.
+    add(torso, rbox(0.075, 0.15, 0.05, 0.012), c.pouch, -0.09, ty(1.27), 0.165);
+    add(torso, tube(0.006, 0.006, 0.3, 6), "#1c2022", -0.11, ty(1.47), 0.17);
+    add(torso, rbox(0.2, 0.22, 0.04, 0.016), c.pouch, 0.03, ty(1.1), 0.163);
+    add(torso, rbox(0.09, 0.025, 0.03, 0.008), c.strap, 0, ty(1.37), 0.155);
+    return;
   }
+  if (a.torso === "hoodie") {
+    // Hoodie: ribbed hem, kangaroo pocket and drawstrings; a sling bag across the chest.
+    add(torso, tube(0.075, 0.09, 0.05, 14), c.shirt, 0, ty(1.455), 0.005);
+    add(torso, tube(0.158, 0.155, 0.05, 18), c.dark, 0, ty(0.965), 0).scale.z = 0.66;
+    add(torso, rbox(0.22, 0.11, 0.03, 0.02), shade(c.shirt, -0.12), 0, ty(1.04), -0.112);
+    for (const s of [-1, 1]) {
+      add(torso, tube(0.004, 0.004, 0.14, 5), "#d8d4cc", s * 0.035, ty(1.36), -0.122);
+      add(torso, ball(0.007, 6, 5), "#d8d4cc", s * 0.035, ty(1.29), -0.122);
+    }
+    const strap = add(torso, rbox(0.04, 0.52, 0.012, 0.005), c.strap, 0, ty(1.22), -0.128);
+    strap.rotation.z = 0.72;
+    const strapBack = add(torso, rbox(0.04, 0.5, 0.012, 0.005), c.strap, 0, ty(1.22), 0.126);
+    strapBack.rotation.z = -0.72;
+    add(torso, rbox(0.17, 0.1, 0.06, 0.025), c.accent, -0.07, ty(1.13), -0.15);
+    add(torso, rbox(0.15, 0.012, 0.062, 0.004), shade(c.accent, -0.3), -0.07, ty(1.17), -0.151);
+    // The hood lies bunched at the back of the neck.
+    add(torso, ball(0.1, 12, 8), c.shirt, 0, ty(1.43), 0.095).scale.set(1.2, 0.55, 0.8);
+    return;
+  }
+  // Field jacket and chest rig.
+  const scarf = add(torso, new THREE.TorusGeometry(0.074, 0.033, 8, 18), c.mask, 0, ty(1.455), 0);
+  scarf.rotation.x = Math.PI / 2;
+  scarf.scale.set(1, 1.12, 1);
+  const tail = add(torso, rbox(0.1, 0.17, 0.022, 0.008), c.mask, 0.03, ty(1.36), 0.128);
+  tail.rotation.x = 0.12;
+  add(torso, rbox(0.026, 0.42, 0.012, 0.004), c.dark, 0, ty(1.16), -0.122);
+  for (const s of [-1, 1]) {
+    add(torso, rbox(0.1, 0.085, 0.02, 0.008), c.dark, s * 0.1, ty(0.99), -0.112);
+    add(torso, rbox(0.1, 0.02, 0.024, 0.006), shade(c.dark, -0.15), s * 0.1, ty(1.03), -0.114);
+  }
+  add(torso, rbox(0.31, 0.15, 0.05, 0.016), c.gear, 0, ty(1.14), -0.137);
+  for (const x of [-0.09, 0, 0.09]) {
+    add(torso, rbox(0.072, 0.15, 0.045, 0.012), c.pouch, x, ty(1.165), -0.17);
+    const mag = add(torso, rbox(0.03, 0.065, 0.055, 0.006), "#35342f", x, ty(1.265), -0.17, "gloss");
+    mag.rotation.x = -0.18;
+  }
+  add(torso, ball(0.04, 10, 8), c.accent, 0.17, ty(1.08), -0.09);
+  // Y-harness: a strap over each shoulder meeting in one down the back, with a small pack.
+  for (const s of [-1, 1]) {
+    const front = add(torso, rbox(0.045, 0.2, 0.014, 0.005), c.strap, s * 0.1, ty(1.33), -0.124);
+    front.rotation.x = 0.22;
+    const back = add(torso, rbox(0.042, 0.2, 0.014, 0.005), c.strap, s * 0.055, ty(1.34), 0.124);
+    back.rotation.z = s * 0.45;
+  }
+  add(torso, rbox(0.045, 0.24, 0.014, 0.005), c.strap, 0, ty(1.13), 0.124);
+  add(torso, rbox(0.2, 0.16, 0.07, 0.025), c.pouch, 0, ty(1.08), 0.15);
+  add(torso, rbox(0.21, 0.035, 0.074, 0.012), c.gear, 0, ty(1.15), 0.151);
 }
 
-function buildHead(head: THREE.Group, ct: boolean) {
-  const H = 0.12;
-  if (ct) {
-    const k = palettes.CT;
-    add(head, tube(0.05, 0.056, 0.1, 12), "#2a3236", 0, -0.01, 0.008);
-    add(head, ball(0.1, 16, 12), k.rubber, 0, H, 0).scale.set(1, 1.17, 1.1);
-    add(head, rbox(0.12, 0.07, 0.12, 0.03), k.rubber, 0, H - 0.07, -0.025);
-    // Full-face mask: rubber seal, twin angled lenses with rims, side filter, exhale valve.
-    add(head, shell(0.112, 1.15, 1.05, 2.45, 16, 10), k.rubber, 0, H, -0.004).scale.set(1, 1.16, 1.12);
-    for (const s of [-1, 1]) {
-      const lens = add(head, tube(0.03, 0.03, 0.012, 16), k.lens, s * 0.041, H + 0.016, -0.122, "gloss");
-      lens.rotation.set(Math.PI / 2, -s * 0.38, 0, "YXZ");
-      const rim = add(head, new THREE.TorusGeometry(0.031, 0.0075, 6, 18), "#2d3234", s * 0.041, H + 0.016, -0.121);
-      rim.rotation.set(0, -s * 0.38, 0);
-    }
-    const filter = frame(head, -0.062, H - 0.058, -0.104, Math.PI / 2, 0.75, 0);
-    add(filter, tube(0.025, 0.025, 0.03, 12), k.rubber, 0, 0.032, 0);
-    add(filter, tube(0.043, 0.043, 0.066, 16), k.filter, 0, -0.012, 0);
-    add(filter, tube(0.036, 0.036, 0.012, 16), "#30352a", 0, -0.05, 0);
-    const valve = frame(head, 0.012, H - 0.074, -0.122, Math.PI / 2, -0.15, 0);
-    add(valve, tube(0.024, 0.029, 0.032, 12), k.rubber, 0, 0, 0);
-    add(valve, tube(0.019, 0.019, 0.008, 12), "#41474a", 0, -0.019, 0);
-    // High-cut helmet with rails, NVG shroud and comms ear cups.
-    const helm = add(
-      head,
-      new THREE.SphereGeometry(0.129, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.53),
-      k.helmet,
-      0,
-      H + 0.024,
-      0.008,
-    );
-    helm.scale.set(1, 0.98, 1.08);
-    helm.rotation.x = 0.3;
-    const rim = add(head, new THREE.TorusGeometry(0.128, 0.008, 6, 26), k.helmet, 0, H + 0.02, 0.008);
-    rim.rotation.x = Math.PI / 2 + 0.3;
-    rim.scale.set(1, 1.08, 1);
-    const shroud = add(head, rbox(0.055, 0.04, 0.028, 0.008), "#2a2f30", 0, H + 0.105, -0.115);
-    shroud.rotation.x = 0.55;
-    for (const s of [-1, 1]) {
-      const rail = add(head, rbox(0.014, 0.026, 0.11, 0.005), "#2a2f30", s * 0.126, H + 0.045, 0.006);
-      rail.rotation.x = 0.3;
-      const cup = add(head, tube(0.043, 0.043, 0.036, 16), "#2b3031", s * 0.112, H - 0.004, 0.012);
-      cup.rotation.z = Math.PI / 2;
-    }
-    add(head, rbox(0.07, 0.045, 0.012, 0.004), k.accent, 0, H + 0.07, 0.137).rotation.x = -0.5;
-  } else {
-    const k = palettes.T;
-    // Knit balaclava: the skull and jaw are knit; only the eye slit shows skin.
-    add(head, tube(0.05, 0.056, 0.1, 12), k.knit, 0, -0.01, 0.008);
-    add(head, ball(0.1, 16, 12), k.knit, 0, H, 0).scale.set(1, 1.17, 1.1);
-    add(head, rbox(0.12, 0.07, 0.12, 0.03), k.knit, 0, H - 0.07, -0.025);
-    add(head, rbox(0.026, 0.042, 0.03, 0.01), k.knit, 0, H - 0.012, -0.114);
-    for (const s of [-1, 1])
-      add(head, ball(0.022, 8, 6), k.knit, s * 0.1, H, 0.005).scale.set(0.55, 1, 0.8);
-    add(head, shell(0.1015, 0.62, 1.32, 1.66, 14, 3), k.skin, 0, H, 0).scale.set(1, 1.17, 1.1);
-    for (const [top, bottom] of [
-      [1.24, 1.33],
-      [1.65, 1.74],
+const H = 0.12;
+/** A bare face: skull, jaw, nose, brow, eyes, ears. `paint` streaks the cheeks; `beard` grows one. */
+function face(head: THREE.Group, a: Agent, opts: { paint?: string; beard?: string; brow?: boolean; jaw?: string } = {}) {
+  const c = a.colors,
+    skinDark = shade(c.skin, -0.18),
+    jaw = opts.jaw ?? c.skin;
+  add(head, tube(0.05, 0.056, 0.1, 12), jaw, 0, -0.01, 0.008);
+  add(head, ball(0.1, 16, 12), c.skin, 0, H, 0).scale.set(1, 1.17, 1.1);
+  add(head, rbox(0.112, 0.068, 0.115, 0.03), jaw, 0, H - 0.07, -0.022);
+  const nose = add(head, rbox(0.022, 0.042, 0.03, 0.009), c.skin, 0, H - 0.012, -0.11);
+  nose.rotation.x = -0.22;
+  if (opts.brow !== false) add(head, rbox(0.098, 0.016, 0.022, 0.007), skinDark, 0, H + 0.03, -0.1);
+  for (const s of [-1, 1]) {
+    add(head, ball(0.0105, 8, 6), "#efe9d6", s * 0.034, H + 0.008, -0.1).scale.z = 0.6;
+    add(head, ball(0.0068, 8, 6), "#2a1e14", s * 0.034, H + 0.008, -0.1065, "gloss").scale.z = 0.5;
+    add(head, ball(0.022, 8, 6), c.skin, s * 0.1, H, 0.005).scale.set(0.5, 1, 0.8);
+  }
+  if (opts.paint) {
+    // Camouflage paint: a dark band across the eyes and a stripe over the brow and chin.
+    for (const [top, bottom, spread] of [
+      [1.36, 1.6, 0.95],
+      [1.12, 1.2, 0.6],
     ])
-      add(head, shell(0.1035, 0.66, top, bottom, 14, 2), "#191918", 0, H, 0).scale.set(1, 1.17, 1.1);
-    for (const s of [-1, 1]) {
-      // Eyes sit deep in the slit under a shadowed brow.
-      add(head, ball(0.0105, 8, 6), k.eye, s * 0.034, H + 0.008, -0.1).scale.z = 0.6;
-      add(head, ball(0.0068, 8, 6), "#2a1e14", s * 0.034, H + 0.008, -0.1065, "gloss").scale.z = 0.5;
-      const lid = add(head, rbox(0.03, 0.008, 0.012, 0.003), "#7a5843", s * 0.034, H + 0.02, -0.103);
-      lid.rotation.z = s * -0.12;
+      add(head, shell(0.1014, spread, top, bottom, 14, 3), opts.paint, 0, H, 0).scale.set(1, 1.17, 1.1);
+  }
+  add(head, rbox(0.04, 0.006, 0.01, 0.002), shade(c.skin, -0.35), 0, H - 0.058, -0.106);
+  if (opts.beard) {
+    add(head, shell(0.104, 0.95, 1.85, 2.55, 14, 6), opts.beard, 0, H, 0).scale.set(1, 1.17, 1.12);
+    add(head, rbox(0.055, 0.014, 0.016, 0.006), opts.beard, 0, H - 0.042, -0.112);
+  }
+}
+/** Combat helmet: shell, rim, side rails, NVG shroud and comms cups. */
+function helmet(head: THREE.Group, a: Agent) {
+  const c = a.colors;
+  const helm = add(head, new THREE.SphereGeometry(0.129, 20, 10, 0, Math.PI * 2, 0, Math.PI * 0.53), c.hat, 0, H + 0.024, 0.008);
+  helm.scale.set(1, 0.98, 1.08);
+  helm.rotation.x = 0.3;
+  const rim = add(head, new THREE.TorusGeometry(0.128, 0.008, 6, 26), c.hat, 0, H + 0.02, 0.008);
+  rim.rotation.x = Math.PI / 2 + 0.3;
+  rim.scale.set(1, 1.08, 1);
+  const shroud = add(head, rbox(0.055, 0.04, 0.028, 0.008), "#2a2f30", 0, H + 0.105, -0.115);
+  shroud.rotation.x = 0.55;
+  for (const s of [-1, 1]) {
+    const rail = add(head, rbox(0.014, 0.026, 0.11, 0.005), "#2a2f30", s * 0.126, H + 0.045, 0.006);
+    rail.rotation.x = 0.3;
+    const cup = add(head, tube(0.043, 0.043, 0.036, 16), "#2b3031", s * 0.112, H - 0.004, 0.012);
+    cup.rotation.z = Math.PI / 2;
+  }
+  add(head, rbox(0.07, 0.045, 0.012, 0.004), c.accent, 0, H + 0.07, 0.137).rotation.x = -0.5;
+}
+function buildHead(head: THREE.Group, a: Agent) {
+  const c = a.colors;
+  switch (a.head) {
+    case "helmet-mask": {
+      add(head, tube(0.05, 0.056, 0.1, 12), "#2a3236", 0, -0.01, 0.008);
+      add(head, ball(0.1, 16, 12), c.mask, 0, H, 0).scale.set(1, 1.17, 1.1);
+      add(head, rbox(0.12, 0.07, 0.12, 0.03), c.mask, 0, H - 0.07, -0.025);
+      // Full-face mask: rubber seal, twin angled lenses with rims, side filter, exhale valve.
+      add(head, shell(0.112, 1.15, 1.05, 2.45, 16, 10), c.mask, 0, H, -0.004).scale.set(1, 1.16, 1.12);
+      for (const s of [-1, 1]) {
+        const lens = add(head, tube(0.03, 0.03, 0.012, 16), c.lens, s * 0.041, H + 0.016, -0.122, "gloss");
+        lens.rotation.set(Math.PI / 2, -s * 0.38, 0, "YXZ");
+        const rim = add(head, new THREE.TorusGeometry(0.031, 0.0075, 6, 18), "#2d3234", s * 0.041, H + 0.016, -0.121);
+        rim.rotation.set(0, -s * 0.38, 0);
+      }
+      const filter = frame(head, -0.062, H - 0.058, -0.104, Math.PI / 2, 0.75, 0);
+      add(filter, tube(0.025, 0.025, 0.03, 12), c.mask, 0, 0.032, 0);
+      add(filter, tube(0.043, 0.043, 0.066, 16), "#5b6248", 0, -0.012, 0);
+      add(filter, tube(0.036, 0.036, 0.012, 16), "#30352a", 0, -0.05, 0);
+      const valve = frame(head, 0.012, H - 0.074, -0.122, Math.PI / 2, -0.15, 0);
+      add(valve, tube(0.024, 0.029, 0.032, 12), c.mask, 0, 0, 0);
+      add(valve, tube(0.019, 0.019, 0.008, 12), "#41474a", 0, -0.019, 0);
+      helmet(head, a);
+      return;
     }
-    // Rolled knit edge at the neck.
-    add(head, tube(0.062, 0.066, 0.03, 14), "#262625", 0, -0.005, 0.008);
+    case "helmet-goggles": {
+      // Face wrapped below the eyes, a wide goggle over them.
+      face(head, a, { brow: false, jaw: c.mask });
+      add(head, shell(0.106, 1.0, 1.62, 2.6, 16, 8), c.mask, 0, H, 0).scale.set(1, 1.17, 1.12);
+      add(head, rbox(0.04, 0.045, 0.04, 0.015), c.mask, 0, H - 0.025, -0.11);
+      const goggle = add(head, shell(0.112, 0.78, 1.22, 1.6, 16, 4), c.lens, 0, H, -0.002, "gloss");
+      goggle.scale.set(1, 1.17, 1.14);
+      const band = add(head, new THREE.TorusGeometry(0.112, 0.012, 6, 28), "#2a2c2e", 0, H + 0.012, 0);
+      band.rotation.x = Math.PI / 2;
+      band.scale.set(1, 1.12, 1);
+      helmet(head, a);
+      return;
+    }
+    case "boonie": {
+      face(head, a, { paint: c.mask });
+      // Boonie hat: soft crown, sweat band, wide drooping brim with a chin cord.
+      add(head, tube(0.098, 0.112, 0.075, 18), c.hat, 0, H + 0.085, 0.004).scale.z = 1.08;
+      add(head, ball(0.1, 14, 6), c.hat, 0, H + 0.115, 0.004).scale.set(1, 0.4, 1.08);
+      add(head, tube(0.113, 0.114, 0.022, 18), c.dark, 0, H + 0.055, 0.004).scale.z = 1.08;
+      const brim = add(head, new THREE.CylinderGeometry(0.115, 0.178, 0.03, 24, 1, true), c.hat, 0, H + 0.035, 0.004);
+      brim.scale.z = 1.05;
+      add(head, new THREE.TorusGeometry(0.176, 0.006, 5, 28), shade(c.hat, -0.15), 0, H + 0.02, 0.004).rotation.x = Math.PI / 2;
+      for (const s of [-1, 1]) {
+        const cord = add(head, tube(0.0025, 0.0025, 0.13, 4), c.strap, s * 0.075, H - 0.03, 0.0);
+        cord.rotation.z = -s * 0.25;
+      }
+      return;
+    }
+    case "hood": {
+      face(head, a, { jaw: c.mask });
+      // Bandana over the nose and mouth, then the hood up over the head, framing the face.
+      add(head, shell(0.107, 1.05, 1.58, 2.6, 16, 8), c.mask, 0, H, 0).scale.set(1, 1.17, 1.13);
+      add(head, rbox(0.04, 0.05, 0.035, 0.016), c.mask, 0, H - 0.03, -0.11);
+      const crown = add(head, new THREE.SphereGeometry(0.127, 20, 8, 0, Math.PI * 2, 0, Math.PI * 0.34), c.hat, 0, H + 0.004, 0.012);
+      crown.scale.set(1, 1.15, 1.1);
+      const sides = add(
+        head,
+        new THREE.SphereGeometry(0.127, 20, 10, Math.PI * 1.5 + 0.78, Math.PI * 2 - 1.56, Math.PI * 0.33, Math.PI * 0.4),
+        c.hat,
+        0,
+        H + 0.004,
+        0.012,
+      );
+      sides.scale.set(1, 1.15, 1.1);
+      // The hood's rim around the face opening.
+      const lip = add(head, new THREE.TorusGeometry(0.1, 0.013, 6, 26), shade(c.hat, -0.08), 0, H + 0.004, -0.088);
+      lip.scale.set(0.98, 1.22, 1);
+      return;
+    }
+    case "beanie": {
+      face(head, a, { beard: "#2b2119" });
+      add(head, new THREE.SphereGeometry(0.108, 16, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), c.hat, 0, H + 0.035, 0.002).scale.set(1, 1.15, 1.1);
+      add(head, tube(0.11, 0.112, 0.038, 18), shade(c.hat, -0.12), 0, H + 0.045, 0.002).scale.z = 1.1;
+      add(head, ball(0.018, 8, 6), shade(c.hat, 0.1), 0, H + 0.165, 0.004);
+      return;
+    }
+    case "shemagh": {
+      // Wrapped head to toe of the face: folds in rings, an eye slit, dark goggles.
+      add(head, tube(0.054, 0.06, 0.1, 12), c.mask, 0, -0.01, 0.008);
+      add(head, ball(0.106, 16, 12), c.hat, 0, H + 0.004, 0.002).scale.set(1, 1.18, 1.12);
+      add(head, rbox(0.125, 0.075, 0.125, 0.032), c.mask, 0, H - 0.07, -0.025);
+      add(head, shell(0.1, 0.62, 1.32, 1.66, 14, 3), c.skin, 0, H, 0).scale.set(1.04, 1.17, 1.12);
+      for (const [y, tilt] of [
+        [0.055, 0.28],
+        [-0.045, -0.22],
+      ]) {
+        // Sized to the wrap at that height so the fold lies on it rather than floating.
+        const r = 0.107 * Math.sqrt(Math.max(0, 1 - (y / (0.106 * 1.18)) ** 2)),
+          fold = add(head, new THREE.TorusGeometry(r, 0.0042, 5, 24), shade(c.hat, -0.14), 0, H + 0.004 + y, 0.002);
+        fold.rotation.set(Math.PI / 2 + tilt, 0, 0);
+        fold.scale.set(1, 1.12, 1);
+      }
+      // Dust goggles: a wide band, rubber frames and dark lenses.
+      const band = add(head, new THREE.TorusGeometry(0.113, 0.01, 6, 28), "#3a3530", 0, H + 0.01, 0.002);
+      band.rotation.x = Math.PI / 2;
+      band.scale.set(1, 1.12, 1);
+      for (const s of [-1, 1]) {
+        const frameRing = add(head, tube(0.031, 0.034, 0.02, 16), "#3a3530", s * 0.04, H + 0.01, -0.114);
+        frameRing.rotation.set(Math.PI / 2, -s * 0.34, 0, "YXZ");
+        const lens = add(head, tube(0.026, 0.026, 0.022, 16), c.lens, s * 0.04, H + 0.01, -0.117, "gloss");
+        lens.rotation.set(Math.PI / 2, -s * 0.34, 0, "YXZ");
+      }
+      add(head, rbox(0.03, 0.012, 0.014, 0.004), "#3a3530", 0, H + 0.012, -0.124);
+      const tail = add(head, rbox(0.09, 0.16, 0.018, 0.008), c.hat, 0.04, H - 0.07, 0.11);
+      tail.rotation.set(0.25, 0, 0.12);
+      return;
+    }
+    default: {
+      // Knit balaclava: the skull and jaw are knit; only the eye slit shows skin.
+      add(head, tube(0.05, 0.056, 0.1, 12), c.hat, 0, -0.01, 0.008);
+      add(head, ball(0.1, 16, 12), c.hat, 0, H, 0).scale.set(1, 1.17, 1.1);
+      add(head, rbox(0.12, 0.07, 0.12, 0.03), c.hat, 0, H - 0.07, -0.025);
+      add(head, rbox(0.026, 0.042, 0.03, 0.01), c.hat, 0, H - 0.012, -0.114);
+      for (const s of [-1, 1]) add(head, ball(0.022, 8, 6), c.hat, s * 0.1, H, 0.005).scale.set(0.55, 1, 0.8);
+      add(head, shell(0.1015, 0.62, 1.32, 1.66, 14, 3), c.skin, 0, H, 0).scale.set(1, 1.17, 1.1);
+      for (const [top, bottom] of [
+        [1.24, 1.33],
+        [1.65, 1.74],
+      ])
+        add(head, shell(0.1035, 0.66, top, bottom, 14, 2), "#191918", 0, H, 0).scale.set(1, 1.17, 1.1);
+      for (const s of [-1, 1]) {
+        // Eyes sit deep in the slit under a shadowed brow.
+        add(head, ball(0.0105, 8, 6), c.lens, s * 0.034, H + 0.008, -0.1).scale.z = 0.6;
+        add(head, ball(0.0068, 8, 6), "#2a1e14", s * 0.034, H + 0.008, -0.1065, "gloss").scale.z = 0.5;
+        const lid = add(head, rbox(0.03, 0.008, 0.012, 0.003), "#7a5843", s * 0.034, H + 0.02, -0.103);
+        lid.rotation.z = s * -0.12;
+      }
+      // Rolled knit edge at the neck.
+      add(head, tube(0.062, 0.066, 0.03, 14), shade(c.hat, 0.06), 0, -0.005, 0.008);
+    }
   }
 }
 
-function buildArm(shoulder: THREE.Group, elbow: THREE.Group, side: number, ct: boolean) {
-  const c = ct ? palettes.CT : palettes.T;
+function buildArm(shoulder: THREE.Group, elbow: THREE.Group, side: number, a: Agent) {
+  const c = a.colors;
   add(shoulder, ball(0.06, 10, 8), c.shirt, 0, 0, 0);
   add(shoulder, tube(0.058, 0.049, 0.25, 10), c.shirt, 0, -0.14, 0);
-  if (ct) {
-    add(shoulder, rbox(0.03, 0.085, 0.075, 0.009), palettes.CT.dark, side * 0.054, -0.11, 0);
-    add(shoulder, rbox(0.008, 0.04, 0.05, 0.003), palettes.CT.accent, side * 0.07, -0.1, 0);
+  if (a.torso === "carrier") {
+    add(shoulder, rbox(0.03, 0.085, 0.075, 0.009), c.dark, side * 0.054, -0.11, 0);
+    add(shoulder, rbox(0.008, 0.04, 0.05, 0.003), c.accent, side * 0.07, -0.1, 0);
   }
   add(elbow, ball(0.049, 10, 8), c.shirt, 0, 0, 0);
-  if (ct) {
-    add(elbow, tube(0.048, 0.04, 0.2, 10), c.shirt, 0, -0.105, 0);
-    add(elbow, tube(0.043, 0.042, 0.035, 10), c.glove, 0, -0.195, 0);
-  } else {
+  if (a.torso === "rig") {
     // Sleeves rolled to the elbow.
-    add(elbow, tube(0.055, 0.053, 0.05, 10), palettes.T.dark, 0, -0.012, 0);
-    add(elbow, tube(0.041, 0.033, 0.2, 10), palettes.T.skin, 0, -0.115, 0);
+    add(elbow, tube(0.055, 0.053, 0.05, 10), c.dark, 0, -0.012, 0);
+    add(elbow, tube(0.041, 0.033, 0.2, 10), c.skin, 0, -0.115, 0);
+  } else {
+    add(elbow, tube(0.048, 0.04, 0.2, 10), c.shirt, 0, -0.105, 0);
+    add(elbow, tube(0.043, 0.042, 0.035, 10), a.torso === "hoodie" ? c.dark : c.glove, 0, -0.195, 0);
   }
   add(elbow, rbox(0.068, 0.088, 0.036, 0.014), c.glove, 0, -L2, 0);
   const fingers = add(elbow, rbox(0.064, 0.055, 0.03, 0.012), c.glove, 0, -L2 - 0.058, -0.014);
@@ -387,27 +505,38 @@ function buildArm(shoulder: THREE.Group, elbow: THREE.Group, side: number, ct: b
   thumb.rotation.z = side * 0.6;
 }
 
-function buildLeg(leg: Leg, side: number, ct: boolean) {
-  const c = ct ? palettes.CT : palettes.T;
+function buildLeg(leg: Leg, side: number, a: Agent) {
+  const c = a.colors,
+    street = a.torso === "hoodie";
   add(leg.hip, ball(0.085, 10, 8), c.pants, 0, 0, 0);
   add(leg.hip, tube(0.085, 0.062, 0.42, 12), c.pants, 0, -0.21, 0);
-  add(leg.hip, rbox(0.045, 0.13, 0.11, 0.014), c.dark, side * 0.077, -0.22, 0);
-  add(leg.hip, rbox(0.047, 0.03, 0.115, 0.01), c.pants, side * 0.078, -0.16, 0);
-  if (ct && side > 0) {
+  if (!street) {
+    add(leg.hip, rbox(0.045, 0.13, 0.11, 0.014), c.dark, side * 0.077, -0.22, 0);
+    add(leg.hip, rbox(0.047, 0.03, 0.115, 0.01), c.pants, side * 0.078, -0.16, 0);
+  } else add(leg.hip, rbox(0.012, 0.42, 0.01, 0.004), shade(c.pants, 0.12), side * 0.07, -0.21, -0.02);
+  if (a.torso === "carrier" && side > 0) {
     // Drop-leg pistol holster on the right thigh.
-    add(leg.hip, rbox(0.05, 0.17, 0.1, 0.014), palettes.CT.gear, 0.1, -0.15, 0.005);
+    add(leg.hip, rbox(0.05, 0.17, 0.1, 0.014), c.gear, 0.1, -0.15, 0.005);
     add(leg.hip, rbox(0.032, 0.065, 0.045, 0.008), "#1e2223", 0.1, -0.045, 0.025);
   }
   add(leg.knee, ball(0.062, 10, 8), c.pants, 0, 0, 0);
   add(leg.knee, tube(0.06, 0.047, 0.38, 12), c.pants, 0, -0.19, 0);
-  if (ct) add(leg.knee, rbox(0.1, 0.12, 0.05, 0.02), palettes.CT.strap, 0, -0.01, -0.058);
+  if (a.torso === "carrier") add(leg.knee, rbox(0.1, 0.12, 0.05, 0.02), c.strap, 0, -0.01, -0.058);
+  if (street) {
+    // Trainers: rounded upper, thick pale sole, a darker heel tab.
+    add(leg.ankle, rbox(0.098, 0.1, 0.12, 0.035), c.boot, 0, -0.02, 0.005);
+    add(leg.ankle, rbox(0.1, 0.06, 0.24, 0.03), c.boot, 0, -0.045, -0.045);
+    add(leg.ankle, rbox(0.108, 0.03, 0.255, 0.012), "#f2f0ea", 0, -0.068, -0.045);
+    add(leg.ankle, rbox(0.06, 0.05, 0.02, 0.006), "#202022", 0, -0.025, 0.07);
+    return;
+  }
   add(leg.ankle, rbox(0.1, 0.14, 0.13, 0.035), c.boot, 0, -0.005, 0.005);
   add(leg.ankle, rbox(0.104, 0.07, 0.25, 0.03), c.boot, 0, -0.045, -0.045);
   add(leg.ankle, rbox(0.11, 0.026, 0.262, 0.009), "#1a1916", 0, -0.067, -0.045);
 }
 
-export function humanoid(team: Team) {
-  const ct = team === "CT",
+export function humanoid(team: Team, agentId?: string) {
+  const agent = agentFor(team, agentId),
     root = new THREE.Group(),
     fall = new THREE.Group(),
     body = new THREE.Group(),
@@ -415,7 +544,7 @@ export function humanoid(team: Team) {
     torso = new THREE.Group(),
     head = new THREE.Group(),
     held = new THREE.Group(),
-    c = ct ? palettes.CT : palettes.T,
+    c = agent.colors,
     legs: Leg[] = [],
     arms: Arm[] = [];
   root.add(fall);
@@ -441,11 +570,11 @@ export function humanoid(team: Team) {
     0,
     0,
   ).scale.z = 0.7;
-  add(hips, tube(0.171, 0.171, 0.055, 18), ct ? palettes.CT.strap : palettes.T.strap, 0, 0.955, 0).scale.z = 0.72;
-  add(hips, rbox(0.06, 0.045, 0.02, 0.006), ct ? "#8f9186" : "#7b6a47", 0, 0.955, -0.126, "gloss");
-  if (!ct) add(hips, rbox(0.08, 0.09, 0.05, 0.012), palettes.T.pouch, -0.15, 0.93, 0.06);
-  buildTorso(torso, ct);
-  buildHead(head, ct);
+  add(hips, tube(0.171, 0.171, 0.055, 18), c.strap, 0, 0.955, 0).scale.z = 0.72;
+  add(hips, rbox(0.06, 0.045, 0.02, 0.006), agent.torso === "carrier" ? "#8f9186" : "#7b6a47", 0, 0.955, -0.126, "gloss");
+  if (agent.torso === "rig") add(hips, rbox(0.08, 0.09, 0.05, 0.012), c.pouch, -0.15, 0.93, 0.06);
+  buildTorso(torso, agent);
+  buildHead(head, agent);
   for (const side of [-1, 1]) {
     const shoulder = new THREE.Group(),
       elbow = new THREE.Group();
@@ -453,7 +582,7 @@ export function humanoid(team: Team) {
     elbow.position.y = -L1;
     shoulder.add(elbow);
     torso.add(shoulder);
-    buildArm(shoulder, elbow, side, ct);
+    buildArm(shoulder, elbow, side, agent);
     arms.push({ shoulder, elbow, side });
     const leg: Leg = {
       hip: new THREE.Group(),
@@ -466,7 +595,7 @@ export function humanoid(team: Team) {
     leg.hip.add(leg.knee);
     leg.knee.add(leg.ankle);
     body.add(leg.hip);
-    buildLeg(leg, side, ct);
+    buildLeg(leg, side, agent);
     legs.push(leg);
   }
   for (const g of [hips, torso, head]) bake(g);
@@ -480,9 +609,12 @@ export function humanoid(team: Team) {
     head,
     held,
     item: "",
+    /** Item key including its look (finish, knife model), so a change rebuilds the held model. */
+    itemKey: "",
     legs,
     arms,
     team,
+    agent: agent.id,
     crouch: 0,
     grip: { right: new THREE.Vector3(), left: null as THREE.Vector3 | null },
   };

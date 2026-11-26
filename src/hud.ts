@@ -13,6 +13,8 @@ import type { Player } from "./sim/player";
 import { hubUrl } from "./hub/navigation";
 import { keyName, mountBindEditor, type Action } from "./keybinds";
 import { nativeApp } from "./platform";
+import { finishById, finishFor, itemLabel, knifeById, rarityInfo, type Look } from "./cosmetics";
+import type { Weapon } from "./config/weapons";
 const money = (v: number) => "$" + v.toLocaleString("en-US");
 const clock = (v: number) => {
   const seconds = Math.ceil(Math.max(0, v));
@@ -53,6 +55,19 @@ export class MatchHud {
   lastInventory = "";
   /** Set by the game for phones: prompts name on-screen buttons instead of keys. */
   touch = false;
+  /** Set by the game: what a player wears, so labels name their knife and finishes. */
+  lookOf: ((p: Player) => Look) | null = null;
+  /** "AK-47 | Magma", "Karambit | Aurora", or the plain name. */
+  itemName(p: Player, item: string) {
+    const look = this.lookOf?.(p),
+      base = item === "knife" ? (look && knifeById.get(look.knife)?.name) || "Knife" : weaponName(item as Weapon);
+    return itemLabel(base, finishFor(look, item));
+  }
+  /** The rarity colour of what `p` holds, or "" for a stock item. */
+  itemColor(p: Player, item: string) {
+    const f = finishById.get(finishFor(this.lookOf?.(p), item));
+    return f && f.id !== "factory" ? rarityInfo[f.rarity].color : "";
+  }
   abort = new AbortController();
   constructor(
     parent: HTMLElement,
@@ -233,7 +248,7 @@ export class MatchHud {
         team +
         " · " +
         this.sim.score[team] +
-        "</caption><thead><tr><th>Operator</th><th>K</th><th>D</th><th>HS</th><th>Cash</th><th>Link</th></tr></thead>";
+        "</caption><thead><tr><th>Operator</th><th>K</th><th>D</th><th>HS</th><th>MVP</th><th>Cash</th><th>Link</th></tr></thead>";
       const body = table.createTBody();
       for (const p of this.sim.players
         .filter((p) => p.team === team)
@@ -244,6 +259,7 @@ export class MatchHud {
           p.kills,
           p.deaths,
           p.headshots,
+          p.mvps ? "★" + p.mvps : "",
           team === this.sim.me.team ? money(p.money) : "—",
           p.id ? "BOT" : "LOCAL",
         ])
@@ -315,7 +331,7 @@ export class MatchHud {
           src +
           "  /  " +
           (e.message === "teamkill" ? "TEAMKILL " : "") +
-          (e.weapon ? weaponName(e.weapon) : "") +
+          (e.weapon ? (e.actor !== undefined ? this.itemName(s.players[e.actor], e.weapon) : weaponName(e.weapon)) : "") +
           (e.head ? " ✛" : "") +
           "  /  " +
           victim +
@@ -507,9 +523,11 @@ export class MatchHud {
     label(el.cash, money(p.money));
     label(
       el.weapon,
-      weaponName(view.weapon) +
+      this.itemName(view, view.weapon) +
         (view.weapon === "glock" && view.glockBurst ? " \u00b7 Burst" : ""),
     );
+    const tint = this.itemColor(view, view.weapon);
+    if (el.weapon.style.color !== tint) el.weapon.style.color = tint;
     this.inventory(view);
     label(
       el.ammo,
@@ -539,7 +557,9 @@ export class MatchHud {
           ? "MATCH STARTING"
           : s.phase === "planted"
             ? "BOMB PLANTED · SITE " + s.plantedSite
-            : "";
+            : s.phase === "ended" && s.mvp >= 0
+              ? "★ ROUND MVP · " + s.players[s.mvp].name.toUpperCase() + " · " + s.mvpWhy.toUpperCase()
+              : "";
     label(el.phase, phase);
     label(
       el.banner,
@@ -613,20 +633,20 @@ export class MatchHud {
     if (view.primary)
       rows.push([
         "primary",
-        weaponName(view.primary.id),
+        this.itemName(view, view.primary.id),
         mag(view.primary),
         view.weapon === view.primary.id,
         1,
       ]);
     rows.push([
       "pistol",
-      weaponName(view.pistol.id) +
+      this.itemName(view, view.pistol.id) +
         (view.pistol.id === "glock" && view.glockBurst ? " \u00b7 Burst" : ""),
       mag(view.pistol),
       view.weapon === view.pistol.id,
       2,
     ]);
-    rows.push(["knife", "Knife", "", view.weapon === "knife", 3]);
+    rows.push(["knife", this.itemName(view, "knife"), "", view.weapon === "knife", 3]);
     for (const n of nades)
       if (view[n] > 0)
         rows.push([

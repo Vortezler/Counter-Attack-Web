@@ -21,6 +21,8 @@ Open [the game lobby](http://127.0.0.1:5177/cs-web/). Choose a callsign and **St
 | Shift / Ctrl / Space | Walk / crouch / jump |
 | Left mouse / right mouse | Fire / cycle scope zoom |
 | R / Q / wheel | Reload / previous equipment / cycle equipment |
+| G | Drop the held primary for a teammate, or set the C4 down |
+| F | Inspect the held weapon (the karambit and butterfly knife show off a spin) |
 | 1 / 2 / 4 / 5 | Primary / pistol / cycle grenades (HE, flash, smoke, molotov) / carried objective |
 | Esc | Leave fullscreen and pause; every other bind can be changed under Controls |
 | 3 | Knife: left click slashes (40), right click stabs (65); a stab from behind always kills |
@@ -29,7 +31,19 @@ Open [the game lobby](http://127.0.0.1:5177/cs-web/). Choose a callsign and **St
 | Hold E | Plant at A or B while carrying the objective, or defuse beside it |
 | B / Tab / Esc | Buy menu / hold scoreboard / pause |
 
+Each bullet or knife hit slows its victim for a moment (tagging), so a player caught in the open can't simply sprint out of a fight. When a round ends, the HUD names its MVP (the defuser, the planter of a bomb that went off, or the winner with the most kills), and the scoreboard counts each player's MVP stars.
+
 Open the buy menu in your spawn during the 15-second freeze or the first 20 seconds of live play. Number keys select an armory category. Use Tab and Enter to select a purchase. The timer, current balance and equipped weapon appear in the HUD. A surviving player keeps their loadout into the next round. Use the lobby settings to adjust sensitivity, volume, field of view, crosshair, HUD scale, and shadows.
+
+## Loadout
+
+The lobby's **Loadout** tab dresses you for every match, saved on this device:
+
+- **Agents**: four outfits per side, from the stock respirator kit and field-jacket militia to an arctic goggle unit, a boonie-hatted jungle patrol, an all-black counter-assault team, a hooded street crew, a bearded guerrilla and a shemagh-wrapped desert raider.
+- **Knives**: combat knife, tanto, bowie, cleaver, karambit and butterfly knife, each with any of eighteen blade finishes, including folded steel, marbling and an aurora fade.
+- **Weapon finishes**: seventeen finishes (plus Factory) for each of the twelve firearms, from common camouflage (hex, digital, splinter) to carbon weave, anodised cobalt, woodblock waves, glowing circuits and magma, gold engraving and a holographic prism.
+
+A 3D stage previews the selection (drag to turn it). Bots roll their own outfits and finishes each match, rarer ones less often. Finishes are painted procedurally (`src/skinPatterns.ts`) and wrapped onto the models in the weapon's own space by a shader (`src/skins.ts`), so they need no UVs; knives are built in `src/knives.ts` and outfits in `src/characters.ts` from the catalogue in `src/cosmetics.ts`.
 
 ## Other entry points
 

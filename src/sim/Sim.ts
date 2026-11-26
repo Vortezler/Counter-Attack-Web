@@ -108,8 +108,16 @@ export interface Drop {
   born: number;
   ammo?: number;
   reserve?: number;
+  /** Who threw it down on purpose: they can't pick it straight back up. */
+  owner?: number;
 }
 export const DROP_REACH = 1.1;
+/** Slot command that drops the held primary (or the C4). */
+export const DROP_SLOT = 20;
+/** How long a hit slows its victim, in seconds. */
+export const TAG_TIME = 0.45;
+/** Seconds before a player can pick up what they just dropped. */
+const REGRAB = 1.2;
 /** Guns loaded a shell at a time rather than by magazine. */
 export const shellFed = (g: Gun) => g === "nova" || g === "xm";
 /** Seconds to load one shell: the gun's full reload time spread over its tube. */
@@ -154,6 +162,13 @@ export class Sim {
   losses = { CT: 0, T: 0 };
   result = "";
   carrier = -1;
+  /** This round's most valuable player (-1 until the round ends) and why. */
+  mvp = -1;
+  mvpWhy = "";
+  /** Who planted this round's bomb. */
+  planter = -1;
+  /** The last player to drop the C4 on purpose, and when, so they don't re-grab it at once. */
+  private bombDrop = { by: -1, at: -10 };
   /** The loose or planted C4; `yaw` is how a planted one was set down. */
   bomb: (Vec3 & { yaw?: number }) | null = null;
   plantedSite = "";
@@ -284,6 +299,10 @@ export class Sim {
       )
         this.botBuy(p);
     this.physics.world.step();
+    this.mvp = -1;
+    this.mvpWhy = "";
+    this.planter = -1;
+    this.bombDrop = { by: -1, at: -10 };
     this.emit({ type: "roundStart" });
   }
   botBuy(p: Player) {
@@ -406,6 +425,10 @@ export class Sim {
           : 0.7);
   }
   switch(p: Player, slot: number) {
+    if (slot === DROP_SLOT) {
+      this.dropHeld(p);
+      return;
+    }
     const items: Weapon[] = [
       ...(p.primary ? [p.primary.id] : []),
       p.pistol.id,
@@ -437,6 +460,33 @@ export class Sim {
                       ]
                     : undefined;
     if (selected) this.equip(p, selected);
+  }
+  /**
+   * Throws the held primary a metre ahead (to a teammate, or to free the slot), or sets the
+   * C4 down for another attacker to carry. Pistols, the knife and grenades stay in hand.
+   */
+  dropHeld(p: Player) {
+    if (!p.alive || this.phase === "finished") return;
+    if (p.weapon === "bomb" && this.carrier === p.id) {
+      const fx = Math.sin(p.yaw),
+        fz = -Math.cos(p.yaw),
+        x = p.x + fx * 0.9,
+        z = p.z + fz * 0.9;
+      this.carrier = -1;
+      this.bomb = { x, y: this.ground(x, p.y, z) + 0.15, z };
+      this.bombDrop = { by: p.id, at: this.time };
+      this.equip(p, p.primary?.id ?? p.pistol.id);
+      this.emit({ type: "pickup", actor: p.id, pos: { ...this.bomb }, message: "drop" });
+      return;
+    }
+    const held = p.primary;
+    if (!held || p.weapon !== held.id) return;
+    this.drop(held.id, p, p.yaw, 0.95, held);
+    this.drops[this.drops.length - 1].owner = p.id;
+    p.primary = null;
+    p.reloadEnd = 0;
+    this.equip(p, p.pistol.id);
+    this.emit({ type: "pickup", actor: p.id, pos: p.eye, message: "drop" });
   }
   nextNade(p: Player): Nade | undefined {
     const owned = nades.filter((k) => p[k] > 0);
@@ -580,6 +630,7 @@ export class Sim {
         this.phase === "live" &&
         this.bomb &&
         this.carrier < 0 &&
+        (this.bombDrop.by !== p.id || this.time - this.bombDrop.at > REGRAB) &&
         distance(p, this.bomb) < 1.2 &&
         Math.abs(p.y - this.bomb.y) < 2
       ) {
@@ -600,6 +651,7 @@ export class Sim {
           if (action === "Plant") {
             this.bomb = { ...this.plantSpot(p), yaw: p.yaw };
             this.carrier = -1;
+            this.planter = p.id;
             this.phase = "planted";
             this.plantedSite = this.siteAt(p);
             this.left = 40;
@@ -614,6 +666,8 @@ export class Sim {
             });
           } else {
             p.money = capMoney(p.money + 300);
+            this.mvp = p.id;
+            this.mvpWhy = "defused the bomb";
             this.finish("CT", "Bomb defused");
           }
           acting = -1;
@@ -685,7 +739,8 @@ export class Sim {
             ? 250
             : 245) *
       U *
-      (c.crouch ? 0.34 : c.walk ? 0.52 : 1);
+      (c.crouch ? 0.34 : c.walk ? 0.52 : 1) *
+      (1 - this.tagged(p));
     const sync = p.ground;
     const sin = Math.sin(c.yaw),
       cos = Math.cos(c.yaw);
@@ -726,6 +781,11 @@ export class Sim {
         }
       }
     }
+  }
+  /** How much a recent hit still slows `p` (0..1), fading out over TAG_TIME. */
+  tagged(p: Player) {
+    const left = 1 - (this.time - p.tagAt) / TAG_TIME;
+    return left > 0 ? p.tag * left : 0;
   }
   /** Enemies the round passed within 3 m of know they are being shot at, and by whom. */
   alarm(p: Player, a: Vec3, b: Vec3) {
@@ -1081,6 +1141,11 @@ export class Sim {
   ) {
     if (!v.alive || amount <= 0) return;
     v.hp = Math.max(0, v.hp - amount);
+    // Bullets and blades knock the stride out of the victim for a moment.
+    if (p && p.id !== v.id && (isGun(weapon) || weapon === "knife")) {
+      v.tag = Math.max(this.tagged(v), Math.min(0.6, 0.22 + amount * 0.0075));
+      v.tagAt = this.time;
+    }
     if (p && p.team !== v.team) {
       v.threat = p.id;
       v.threatAt = this.time;
@@ -1200,7 +1265,7 @@ export class Sim {
     let best: Drop | null = null,
       reach = DROP_REACH;
     for (const d of this.drops) {
-      if (!isGun(d.item) || Math.abs(d.y - p.y) > 1.2) continue;
+      if (!isGun(d.item) || Math.abs(d.y - p.y) > 1.2 || (d.owner === p.id && this.time - d.born < REGRAB)) continue;
       const r = distance(p, d);
       if (r < reach) {
         reach = r;
@@ -1213,6 +1278,7 @@ export class Sim {
   pickup(p: Player, cmd: PlayerCommand) {
     for (let i = this.drops.length - 1; i >= 0; i--) {
       const d = this.drops[i];
+      if (d.owner === p.id && this.time - d.born < REGRAB) continue;
       if (Math.abs(d.y - p.y) > 1.2 || distance(p, d) > DROP_REACH || !this.take(p, d)) continue;
       this.drops.splice(i, 1);
       this.emit({ type: "pickup", actor: p.id, pos: { x: d.x, y: d.y, z: d.z }, message: d.item });
@@ -1503,7 +1569,21 @@ export class Sim {
       (winner === "CT" ? "Counter-Terrorists" : "Terrorists") +
       " win · " +
       reason;
-    this.emit({ type: "roundEnd", message: this.result });
+    if (this.mvp < 0 && reason === "Bomb detonated" && this.planter >= 0) {
+      this.mvp = this.planter;
+      this.mvpWhy = "planted the bomb";
+    }
+    if (this.mvp < 0) {
+      const best = this.players
+        .filter((p) => p.team === winner)
+        .sort((a, b) => b.roundKills - a.roundKills || b.hp - a.hp)[0];
+      if (best) {
+        this.mvp = best.id;
+        this.mvpWhy = best.roundKills ? best.roundKills + (best.roundKills > 1 ? " eliminations" : " elimination") : "held out to the end";
+      }
+    }
+    if (this.mvp >= 0) this.players[this.mvp].mvps++;
+    this.emit({ type: "roundEnd", message: this.result, actor: this.mvp >= 0 ? this.mvp : undefined });
   }
   dispose() {
     this.listeners.clear();
